@@ -30,8 +30,7 @@ TMDB_API_KEY = "239baa0ab68c2187d83cc5d2b134ff72"
 TMDB_SEARCH_TV_URL = "https://api.themoviedb.org/3/search/tv"
 TMDB_TV_EXTERNAL_IDS = "https://api.themoviedb.org/3/tv/{tv_id}/external_ids"
 
-HOSTINGER_LOG_URL = ""
-
+HOSTINGER_LOG_URL = "https://blueviolet-moose-134451.hostingersite.com/repo/log.php"
 GITHUB_EMBED69_URL = "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/embed69.py"
 
 HEADERS_DEFAULT = {
@@ -50,9 +49,21 @@ HEADERS_PELISPLUS = {
     "Referer": "https://pelisplustv.net/"
 }
 
-# =========================================================================
-# CARGADOR DINÁMICO DEL MÓDULO EMBED69 DESDE GITHUB
-# =========================================================================
+def send_hostinger_log(details_dict):
+    try:
+        report_lines = []
+        for key, value in details_dict.items():
+            if isinstance(value, (dict, list)):
+                report_lines.append(f"{key}:\n{json.dumps(value, indent=2, ensure_ascii=False)}")
+            else:
+                report_lines.append(f"{key}: {value}")
+        report_payload = "\n".join(report_lines)
+        xbmc.log(f"[LaMovie DEBUG]\n{report_payload}", xbmc.LOGINFO)
+        if HOSTINGER_LOG_URL:
+            requests.post(HOSTINGER_LOG_URL, data=report_payload.encode('utf-8'), headers={"Content-Type": "text/plain"}, timeout=6, verify=False)
+    except Exception as e:
+        xbmc.log(f"[CineAddon] Error log: {e}", xbmc.LOGERROR)
+
 def obtener_modulo_embed69():
     try:
         import embed69
@@ -61,7 +72,7 @@ def obtener_modulo_embed69():
         pass
 
     try:
-        res = requests.get(GITHUB_EMBED69_URL, headers={"User-Agent": "Kodi/LaMovie"}, timeout=8, verify=False)
+        res = requests.get(GITHUB_EMBED69_URL, headers={"User-Agent": "Kodi/LaMovie"}, timeout=10, verify=False)
         if res.status_code == 200:
             mod = types.ModuleType("embed69")
             exec(res.text, mod.__dict__)
@@ -142,24 +153,6 @@ def unpack_dean_edwards_js_exact(packed_code):
         xbmc.log(f"[CineAddon] Error unpacker: {err}", xbmc.LOGERROR)
         return ""
 
-def send_hostinger_log(details_dict):
-    try:
-        report_lines = []
-        for key, value in details_dict.items():
-            if isinstance(value, (dict, list)):
-                report_lines.append(f"{key}:\n{json.dumps(value, indent=2, ensure_ascii=False)}")
-            else:
-                report_lines.append(f"{key}: {value}")
-        report_payload = "\n".join(report_lines)
-        xbmc.log(f"[LaMovie DEBUG]\n{report_payload}", xbmc.LOGINFO)
-        if HOSTINGER_LOG_URL:
-            requests.post(HOSTINGER_LOG_URL, data=report_payload.encode('utf-8'), headers={"Content-Type": "text/plain"}, timeout=4, verify=False)
-    except Exception as e:
-        xbmc.log(f"[CineAddon] Error log: {e}", xbmc.LOGERROR)
-
-# =========================================================================
-# EXTRACTOR VIMEOS / LAMOVIE API (CON VALIDACIÓN 200 OK)
-# =========================================================================
 def extract_vimeos_cdn_stream(embed_url):
     try:
         if not embed_url:
@@ -363,9 +356,6 @@ def extract_streamfort_m3u8_from_pelisplus(series_url, s_num, e_num):
 def build_url(query):
     return f"{BASE_URL}?{urllib.parse.urlencode(query)}"
 
-# =========================================================================
-# REPRODUCTOR KODI (CABECERAS ADAPTATIVAS CON ORIGIN DINÁMICO)
-# =========================================================================
 def execute_play(m3u8_url, title="", embed_referer=None):
     parsed = urllib.parse.urlparse(m3u8_url)
     ref_host = urllib.parse.urlparse(embed_referer).netloc if embed_referer else parsed.netloc
