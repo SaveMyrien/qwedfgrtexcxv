@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- v4 -*-
 import sys
 import re
 import urllib.parse
@@ -208,7 +209,7 @@ def normalize_string(text):
     replacements = (
         ("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"),
         ("Á", "a"), ("É", "e"), ("Í", "i"), ("Ó", "o"), ("Ú", "u"),
-        ("ñ", "n"), ("Ñ", "n")
+        ("ñ", "n"), ("Ñ", "n"), ("&", " y ")
     )
     for a, b in replacements:
         text = text.replace(a, b)
@@ -356,22 +357,31 @@ def get_catalog(post_type="movies", page=1):
         return []
 
 def resolve_movie(title, year=""):
-    search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(title)}&postsPerPage=15"
-    try:
-        res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
-        posts = res.json().get("data", {}).get("posts", [])
-    except Exception as e:
-        xbmc.log(f"[LaMovie] Error búsqueda película: {e}", xbmc.LOGERROR)
-        posts = []
+    sanitized_search = re.sub(r'[:\-–—&]', ' ', title).strip()
+    sanitized_search = re.sub(r'\s+', ' ', sanitized_search)
 
-    if not posts:
-        sanitized_query = re.sub(r'[&:/\-]', ' ', title).split()[0]
-        search_url_alt = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(sanitized_query)}&postsPerPage=15"
+    search_queries = [title]
+    if sanitized_search and sanitized_search not in search_queries:
+        search_queries.append(sanitized_search)
+
+    words = sanitized_search.split()
+    if words and words[0] not in search_queries:
+        search_queries.append(words[0])
+
+    posts = []
+    for q in search_queries:
+        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(q)}&postsPerPage=20"
         try:
-            res_alt = requests.get(search_url_alt, headers=HEADERS_DEFAULT, timeout=10, verify=False)
-            posts = res_alt.json().get("data", {}).get("posts", [])
-        except Exception:
-            posts = []
+            res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
+            fetched_posts = res.json().get("data", {}).get("posts", [])
+            if fetched_posts:
+                posts.extend(fetched_posts)
+                match_early = find_best_post_match(posts, title, year)
+                if match_early:
+                    posts = [match_early]
+                    break
+        except Exception as e:
+            xbmc.log(f"[LaMovie] Error búsqueda película: {e}", xbmc.LOGERROR)
 
     selected_post = find_best_post_match(posts, title, year)
     if not selected_post:
