@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v4 -*-
+# -*- v5 -*-
 import sys
 import re
 import urllib.parse
@@ -76,13 +76,19 @@ def parse_raw_query_string(raw_query):
                 current_key = k_clean
                 params[current_key] = v_clean
             else:
-                params[current_key] = f"{params[current_key]} & {token}"
+                merged = f"{params[current_key]}&{token}"
+                params[current_key] = re.sub(r'\s*&\s*', ' & ', merged).strip()
         else:
             token_clean = urllib.parse.unquote_plus(token)
             if current_key:
-                params[current_key] = f"{params[current_key]} & {token_clean}"
+                merged = f"{params[current_key]}&{token_clean}"
+                params[current_key] = re.sub(r'\s*&\s*', ' & ', merged).strip()
             else:
                 params[token_clean] = ""
+
+    for k in params:
+        if isinstance(params[k], str):
+            params[k] = re.sub(r'\s+', ' ', params[k]).strip()
 
     return params
 
