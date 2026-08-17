@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- v7 -*-
 import sys
 import re
 import urllib.parse
@@ -171,6 +170,21 @@ def show_cinema_modal(movie_title, movie_year=""):
 
     dialog = xbmcgui.Dialog()
     dialog.ok(title_header, line_msg)
+
+def ask_cam_quality_playback(movie_title):
+    dialog = xbmcgui.Dialog()
+    msg = (
+        "Esta película aún no está disponible en alta definición,\n"
+        "sin embargo, puedes verla en calidad de cine. La decisión es tuya.\n"
+        "Tan pronto esté disponible en HD, seremos los primeros en actualizarla."
+    )
+    # Retorna True si pulsa 'Ver de todas formas' / Aceptar
+    return dialog.yesno(
+        f"[COLOR yellow]{movie_title}[/COLOR]",
+        msg,
+        yeslabel="Ver en calidad cine",
+        nolabel="Cancelar"
+    )
 
 def get_tmdb_series_info(title, max_year=""):
     if not title or title == "_":
@@ -365,6 +379,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
 
     final_m3u8 = None
     final_embed_url = None
+    is_cam_quality = False
 
     # 1. Intentar con la.py (LaMovie)
     mod_la = cargar_modulo_remoto("la")
@@ -373,11 +388,19 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         if final_m3u8:
             log_data["PROVEEDOR"] = "LAMOVIE_API"
 
-    # 2. Respaldo exclusivo de películas con pelis28.py si LaMovie falla o no tiene stream
+    # 2. Respaldo exclusivo de películas con pelis28.py
     if not final_m3u8:
         mod_pelis28 = cargar_modulo_remoto("pelis28")
         if mod_pelis28 and hasattr(mod_pelis28, "extract_pelis28_movie_stream"):
-            m3u8_p28, ref_p28 = mod_pelis28.extract_pelis28_movie_stream(clean_title, str(year), log_dict=log_data)
+            res_p28 = mod_pelis28.extract_pelis28_movie_stream(clean_title, str(year), log_dict=log_data)
+            if isinstance(res_p28, tuple) and len(res_p28) == 3:
+                m3u8_p28, ref_p28, is_cam_p28 = res_p28
+                is_cam_quality = bool(is_cam_p28)
+            elif isinstance(res_p28, tuple) and len(res_p28) == 2:
+                m3u8_p28, ref_p28 = res_p28
+            else:
+                m3u8_p28, ref_p28 = None, None
+
             if m3u8_p28:
                 final_m3u8 = m3u8_p28
                 final_embed_url = ref_p28
@@ -388,6 +411,16 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         send_hostinger_log(log_data)
         show_cinema_modal(clean_title, year)
         return
+
+    # Si la fuente es calidad de cine (LATINO sin HD), pedir confirmación
+    if is_cam_quality:
+        wants_to_play = ask_cam_quality_playback(clean_title)
+        if not wants_to_play:
+            if HANDLE >= 0:
+                xbmcplugin.setResolvedUrl(HANDLE, False, listitem=xbmcgui.ListItem())
+            log_data["STATUS"] = "CANCELADO_POR_USUARIO_CALIDAD_CINE"
+            send_hostinger_log(log_data)
+            return
 
     log_data["STATUS"] = "REPRODUCIENDO_PELICULA"
     log_data["M3U8"] = final_m3u8
