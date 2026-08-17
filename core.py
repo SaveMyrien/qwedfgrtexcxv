@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- asd -*-
+# -*- v6 -*-
 import sys
 import re
 import urllib.parse
@@ -250,9 +250,6 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
     # BLOQUE EXCLUSIVO DE SERIES
     # ==========================
     if is_series:
-        if HANDLE >= 0:
-            xbmcplugin.setContent(HANDLE, "episodes")
-
         s_num = int(season)
         e_num = int(episode)
 
@@ -370,9 +367,6 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
     # =============================
     # BLOQUE EXCLUSIVO DE PELICULAS
     # =============================
-    if HANDLE >= 0:
-        xbmcplugin.setContent(HANDLE, "movies")
-
     log_data = {
         "SYS_ARGV": sys.argv,
         "TITLE_PARAM": clean_title,
@@ -394,7 +388,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         if final_m3u8:
             log_data["PROVEEDOR"] = "LAMOVIE_API"
 
-    # 2. Respaldo con pelis28.py
+    # 2. Respaldo exclusivo de películas con pelis28.py
     if not final_m3u8:
         mod_pelis28 = cargar_modulo_remoto("pelis28")
         if mod_pelis28 and hasattr(mod_pelis28, "extract_pelis28_movie_stream"):
@@ -418,7 +412,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         show_cinema_modal(clean_title, year)
         return
 
-    # Si es calidad de cine (LATINO sin HD), pedir confirmación
+    # Si la calidad es exclusivamente de cine (LATINO sin HD), pedir confirmación
     if is_cam_quality:
         wants_to_play = ask_cam_quality_playback(clean_title)
         if not wants_to_play:
