@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-# -*- v4 -*-
+# -*- v5 -*-
 import sys
 import re
 import urllib.parse
+import html
 import uuid
 import time
 import requests
@@ -109,7 +110,7 @@ def extract_vimeos_cdn_stream(embed_url):
         if res_embed.status_code != 200:
             return None, None
 
-        html = res_embed.text
+        html_text = res_embed.text
 
         try:
             random_uuid = str(uuid.uuid4())
@@ -122,7 +123,7 @@ def extract_vimeos_cdn_stream(embed_url):
         except Exception:
             pass
 
-        unpacked_js = unpack_dean_edwards_js_exact(html)
+        unpacked_js = unpack_dean_edwards_js_exact(html_text)
         raw_m3u8 = None
         if unpacked_js:
             file_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', unpacked_js, re.I)
@@ -140,8 +141,8 @@ def extract_vimeos_cdn_stream(embed_url):
                     raw_m3u8 = simple_match.group(1)
 
         if not raw_m3u8:
-            html_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html, re.I) or \
-                         re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', html, re.I)
+            html_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html_text, re.I) or \
+                         re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', html_text, re.I)
             if html_match and html_match.group(1):
                 raw_m3u8 = html_match.group(1)
 
@@ -205,11 +206,12 @@ def extract_vimeos_cdn_stream(embed_url):
 def normalize_string(text):
     if not text:
         return ""
+    text = html.unescape(text)
     text = re.sub(r'\(\d{4}\)', '', text)
     replacements = (
         ("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"),
         ("Á", "a"), ("É", "e"), ("Í", "i"), ("Ó", "o"), ("Ú", "u"),
-        ("ñ", "n"), ("Ñ", "n"), ("&", " y ")
+        ("ñ", "n"), ("Ñ", "n"), ("&amp;", " y "), ("&", " y ")
     )
     for a, b in replacements:
         text = text.replace(a, b)
@@ -356,19 +358,38 @@ def get_catalog(post_type="movies", page=1):
         xbmc.log(f"[LaMovie] Error catálogo: {e}", xbmc.LOGERROR)
         return []
 
+def build_search_variations(raw_title):
+    variations = []
+    base_title = raw_title.strip()
+    
+    if base_title and base_title not in variations:
+        variations.append(base_title)
+    
+    if "&" in base_title and "&amp;" not in base_title:
+        amp_title = base_title.replace("&", "&amp;")
+        if amp_title not in variations:
+            variations.append(amp_title)
+            
+    if "&amp;" in base_title:
+        unescaped_title = base_title.replace("&amp;", "&")
+        if unescaped_title not in variations:
+            variations.append(unescaped_title)
+
+    sanitized = re.sub(r'[:\-–—&]', ' ', base_title).strip()
+    sanitized = re.sub(r'\s+', ' ', sanitized)
+    if sanitized and sanitized not in variations:
+        variations.append(sanitized)
+
+    words = sanitized.split()
+    if words and words[0] not in variations:
+        variations.append(words[0])
+
+    return variations
+
 def resolve_movie(title, year=""):
-    sanitized_search = re.sub(r'[:\-–—&]', ' ', title).strip()
-    sanitized_search = re.sub(r'\s+', ' ', sanitized_search)
-
-    search_queries = [title]
-    if sanitized_search and sanitized_search not in search_queries:
-        search_queries.append(sanitized_search)
-
-    words = sanitized_search.split()
-    if words and words[0] not in search_queries:
-        search_queries.append(words[0])
-
+    search_queries = build_search_variations(title)
     posts = []
+
     for q in search_queries:
         search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(q)}&postsPerPage=20"
         try:
@@ -419,10 +440,17 @@ def resolve_movie(title, year=""):
     return None, None
 
 def resolve_series(query_candidates, s_num, e_num, effective_year=""):
-    series_post = None
-    used_query = query_candidates[0] if query_candidates else ""
+    expanded_candidates = []
+    for cand in query_candidates:
+        vars_cand = build_search_variations(cand)
+        for v in vars_cand:
+            if v not in expanded_candidates:
+                expanded_candidates.append(v)
 
-    for candidate_query in query_candidates:
+    series_post = None
+    used_query = expanded_candidates[0] if expanded_candidates else ""
+
+    for candidate_query in expanded_candidates:
         search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(candidate_query)}&postsPerPage=26"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
