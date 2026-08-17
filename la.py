@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v7 -*-
+# -*- v8 -*-
 import sys
 import re
 import urllib.parse
@@ -241,12 +241,22 @@ def find_best_post_match(posts, search_title, target_year=""):
     clean_target_tokens = clean_target.replace(" ", "")
     target_year = str(target_year).strip()
 
+    # Si tenía un & tomamos la primera palabra clave (ej. 'minions')
+    first_keyword = clean_target.split()[0] if clean_target else ""
+
     if target_year:
         for post in posts:
             p_clean = normalize_string(post.get("title", ""))
             p_year = extract_year_from_post(post)
             if clean_target_tokens == p_clean.replace(" ", "") and p_year == target_year:
                 return post
+
+        for post in posts:
+            p_clean = normalize_string(post.get("title", ""))
+            p_year = extract_year_from_post(post)
+            if ("&" in search_title or "&amp;" in search_title) and first_keyword:
+                if first_keyword in p_clean and p_year == target_year:
+                    return post
 
         for post in posts:
             p_clean = normalize_string(post.get("title", ""))
@@ -262,6 +272,9 @@ def find_best_post_match(posts, search_title, target_year=""):
             continue
         if clean_target_tokens == p_clean.replace(" ", ""):
             return post
+        if ("&" in search_title or "&amp;" in search_title) and first_keyword:
+            if first_keyword in p_clean:
+                return post
 
     return None
 
@@ -272,6 +285,7 @@ def find_best_series_match(posts, search_title, target_year=""):
     clean_target = normalize_string(search_title)
     clean_target_tokens = clean_target.replace(" ", "")
     target_year = str(target_year).strip()
+    first_keyword = clean_target.split()[0] if clean_target else ""
 
     if target_year:
         for post in posts:
@@ -279,6 +293,13 @@ def find_best_series_match(posts, search_title, target_year=""):
             p_year = extract_year_from_post(post)
             if clean_target_tokens == p_clean.replace(" ", "") and p_year == target_year:
                 return post
+
+        for post in posts:
+            p_clean = normalize_string(post.get("title", ""))
+            p_year = extract_year_from_post(post)
+            if ("&" in search_title or "&amp;" in search_title) and first_keyword:
+                if first_keyword in p_clean and p_year == target_year:
+                    return post
 
         pattern = rf'\b{re.escape(clean_target)}\b'
         for post in posts:
@@ -293,6 +314,9 @@ def find_best_series_match(posts, search_title, target_year=""):
         p_clean = normalize_string(post.get("title", ""))
         if clean_target_tokens == p_clean.replace(" ", ""):
             return post
+        if ("&" in search_title or "&amp;" in search_title) and first_keyword:
+            if first_keyword in p_clean:
+                return post
 
     pattern = rf'\b{re.escape(clean_target)}\b'
     for post in posts:
@@ -365,43 +389,24 @@ def build_search_variations(raw_title):
     if not base_title:
         return variations
 
-    # 1. Si contiene '&', generar la variante prefijo exacta (ej: 'Minions &')
-    if "&" in base_title:
-        parts_and = base_title.split("&")
-        prefix_and = f"{parts_and[0].strip()} &"
-        if prefix_and not in variations:
-            variations.append(prefix_and)
-            
-    # 2. Si contiene '&amp;', generar prefijo con '&'
-    if "&amp;" in base_title:
-        parts_amp = base_title.split("&amp;")
-        prefix_amp = f"{parts_amp[0].strip()} &"
-        if prefix_amp not in variations:
-            variations.append(prefix_amp)
+    # PRIORIDAD 1: Si contiene '&' o '&amp;', usar SOLO la parte antes del '&'
+    if "&" in base_title or "&amp;" in base_title:
+        raw_cut = base_title.replace("&amp;", "&")
+        first_part = raw_cut.split("&")[0].strip()
+        if first_part and first_part not in variations:
+            variations.append(first_part)
 
-    # 3. Título completo original
+    # PRIORIDAD 2: Título completo original
     if base_title not in variations:
         variations.append(base_title)
-    
-    # 4. Variante con entidad de texto '&amp;'
-    if "&" in base_title and "&amp;" not in base_title:
-        amp_title = base_title.replace("&", "&amp;")
-        if amp_title not in variations:
-            variations.append(amp_title)
-            
-    # 5. Variante decodificada
-    if "&amp;" in base_title:
-        unescaped_title = base_title.replace("&amp;", "&")
-        if unescaped_title not in variations:
-            variations.append(unescaped_title)
 
-    # 6. Variante limpia sin caracteres especiales
+    # PRIORIDAD 3: Limpieza de caracteres
     sanitized = re.sub(r'[:\-–—&]', ' ', base_title).strip()
     sanitized = re.sub(r'\s+', ' ', sanitized)
     if sanitized and sanitized not in variations:
         variations.append(sanitized)
 
-    # 7. Primera palabra como respaldo
+    # PRIORIDAD 4: Primera palabra como respaldo
     words = sanitized.split()
     if words and words[0] not in variations:
         variations.append(words[0])
@@ -413,7 +418,7 @@ def resolve_movie(title, year=""):
     posts = []
 
     for q in search_queries:
-        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(q)}&postsPerPage=20"
+        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(q)}&postsPerPage=20"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
             fetched_posts = res.json().get("data", {}).get("posts", [])
@@ -473,7 +478,7 @@ def resolve_series(query_candidates, s_num, e_num, effective_year=""):
     used_query = expanded_candidates[0] if expanded_candidates else ""
 
     for candidate_query in expanded_candidates:
-        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(candidate_query)}&postsPerPage=26"
+        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(candidate_query)}&postsPerPage=26"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
             posts = res.json().get("data", {}).get("posts", [])
