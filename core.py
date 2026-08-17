@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- v1 -*-
 import sys
 import re
 import urllib.parse
@@ -65,22 +66,41 @@ def send_hostinger_log(details_dict):
     except Exception as e:
         xbmc.log(f"[CineAddon] Error log: {e}", xbmc.LOGERROR)
 
-def obtener_modulo_github(nombre_modulo, raw_url):
+def obtener_modulo_embed69():
     try:
-        if nombre_modulo in sys.modules:
-            return sys.modules[nombre_modulo]
+        import embed69
+        return embed69
     except Exception:
         pass
 
     try:
-        res = requests.get(raw_url, headers={"User-Agent": "Kodi/LaMovie"}, timeout=10, verify=False)
+        res = requests.get(GITHUB_EMBED69_URL, headers={"User-Agent": "Kodi/LaMovie"}, timeout=10, verify=False)
         if res.status_code == 200:
-            mod = types.ModuleType(nombre_modulo)
+            mod = types.ModuleType("embed69")
             exec(res.text, mod.__dict__)
-            sys.modules[nombre_modulo] = mod
+            sys.modules["embed69"] = mod
             return mod
     except Exception as e:
-        xbmc.log(f"[LaMovie] Error al descargar {nombre_modulo} desde GitHub: {e}", xbmc.LOGERROR)
+        xbmc.log(f"[LaMovie] Error al descargar embed69.py desde GitHub: {e}", xbmc.LOGERROR)
+
+    return None
+
+def obtener_modulo_pelis28():
+    try:
+        import pelis28
+        return pelis28
+    except Exception:
+        pass
+
+    try:
+        res = requests.get(GITHUB_PELIS28_URL, headers={"User-Agent": "Kodi/LaMovie"}, timeout=10, verify=False)
+        if res.status_code == 200:
+            mod = types.ModuleType("pelis28")
+            exec(res.text, mod.__dict__)
+            sys.modules["pelis28"] = mod
+            return mod
+    except Exception as e:
+        xbmc.log(f"[LaMovie] Error al descargar pelis28.py desde GitHub: {e}", xbmc.LOGERROR)
 
     return None
 
@@ -753,7 +773,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         # OPCIÓN 3: Embed69 (Llamado dinámico al módulo de GitHub)
         # -------------------------------------------------------------
         if not final_m3u8 and imdb_id:
-            mod_embed69 = obtener_modulo_github("embed69", GITHUB_EMBED69_URL)
+            mod_embed69 = obtener_modulo_embed69()
             if mod_embed69 and hasattr(mod_embed69, "extract_embed69_stream"):
                 m3u8_embed69, embed_embed69 = mod_embed69.extract_embed69_stream(imdb_id, s_num, e_num, log_dict=log_data)
                 if m3u8_embed69:
@@ -774,7 +794,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         return
 
     # =============================
-    # BLOQUE EXCLUSIVO DE PELÍCULAS
+    # BLOQUE ORIGINAL DE PELÍCULAS
     # =============================
     log_data = {
         "SYS_ARGV": sys.argv,
@@ -793,6 +813,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
     # OPCIÓN 1: LaMovie API
     # -------------------------------------------------------------
     search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(clean_title)}&postsPerPage=15"
+    
     try:
         res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
         posts = res.json().get("data", {}).get("posts", [])
@@ -835,27 +856,26 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
                 ordered_embeds = embeds
 
             for candidate_embed in ordered_embeds:
-                m3u8_cand, ref_cand = extract_vimeos_cdn_stream(candidate_embed.get("url", ""))
-                if m3u8_cand:
-                    final_m3u8 = m3u8_cand
-                    final_embed_url = ref_cand
+                final_m3u8, final_embed_url = extract_vimeos_cdn_stream(candidate_embed.get("url", ""))
+                if final_m3u8:
                     log_data["PROVEEDOR"] = "LAMOVIE_API"
                     break
 
     # -------------------------------------------------------------
-    # OPCIÓN 2: Pelis28 (Llamado dinámico a pelis28.py de GitHub)
+    # OPCIÓN 2: Fallback Pelis28 (Solo para Películas)
     # -------------------------------------------------------------
     if not final_m3u8:
-        mod_pelis28 = obtener_modulo_github("pelis28", GITHUB_PELIS28_URL)
+        xbmc.log(f"[CineAddon] LaMovie falló para '{clean_title}'. Probando Pelis28...", xbmc.LOGINFO)
+        mod_pelis28 = obtener_modulo_pelis28()
         if mod_pelis28 and hasattr(mod_pelis28, "extract_pelis28_movie_stream"):
-            m3u8_p28, ref_p28 = mod_pelis28.extract_pelis28_movie_stream(clean_title, str(year).strip(), log_dict=log_data)
+            m3u8_p28, embed_p28 = mod_pelis28.extract_pelis28_movie_stream(clean_title, str(year).strip(), log_dict=log_data)
             if m3u8_p28:
                 final_m3u8 = m3u8_p28
-                final_embed_url = ref_p28
-                log_data["PROVEEDOR"] = "PELIS28_VIMEOS"
+                final_embed_url = embed_p28
+                log_data["PROVEEDOR"] = "PELIS28"
 
     if not final_m3u8:
-        log_data["STATUS"] = "ERROR_EXTRAER_M3U8"
+        log_data["STATUS"] = "ERROR_PELICULA_NO_DISPONIBLE"
         send_hostinger_log(log_data)
         show_cinema_modal(clean_title, year)
         return
