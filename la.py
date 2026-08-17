@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v5 -*-
+# -*- v6 -*-
 import sys
 import re
 import urllib.parse
