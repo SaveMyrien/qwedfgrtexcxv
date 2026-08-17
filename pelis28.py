@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- v1 -*-
 import re
 import urllib.parse
 import json
@@ -249,7 +248,7 @@ def resolver_reproductor(embed_url, referer_page):
 
 def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
     if not query_title:
-        return None, None
+        return None, None, False
 
     search_term = query_title.strip()
     if "&" in search_term or "&amp;" in search_term:
@@ -265,12 +264,12 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
         if res.status_code != 200:
             if log_dict is not None:
                 log_dict["PELIS28_ERROR"] = f"HTTP_{res.status_code}"
-            return None, None
+            return None, None, False
         html_search = res.text
     except Exception as e:
         if log_dict is not None:
             log_dict["PELIS28_EXCEPTION"] = str(e)
-        return None, None
+        return None, None, False
 
     pattern_card = r'<div class="result-item">[\s\S]*?<a href="([^"]+)"[\s\S]*?<div class="title"><a[^>]*>([^<]+)</a></div>[\s\S]*?<span class="year">(\d{4})</span>'
     matches = re.findall(pattern_card, html_search)
@@ -282,7 +281,7 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
     if not matches:
         if log_dict is not None:
             log_dict["PELIS28_ERROR"] = "SIN_RESULTADOS"
-        return None, None
+        return None, None, False
 
     selected_url = None
     for link, name, year in matches:
@@ -299,10 +298,28 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
     try:
         res_movie = requests.get(selected_url, headers=HEADERS_DEFAULT, timeout=12, verify=False)
         if res_movie.status_code != 200:
-            return None, None
+            return None, None, False
         html_movie = res_movie.text
     except Exception:
-        return None, None
+        return None, None, False
+
+    # Detectar si las opciones disponibles solo dicen 'LATINO' (calidad de cine) y no 'HD'
+    options_tags = re.findall(r"<li[^>]*class=['\"][^'\"]*dooplay_player_option[^'\"]*['\"][^>]*>[\s\S]*?<span class=['\"]title['\"]>([^<]+)</span>", html_movie)
+    valid_titles = []
+    for opt_t in options_tags:
+        t_clean = opt_t.strip().upper()
+        if "TRAILER" not in t_clean:
+            valid_titles.append(t_clean)
+
+    is_cam = False
+    if valid_titles:
+        has_hd = any("HD" in t for t in valid_titles)
+        if not has_hd and any("LATINO" in t for t in valid_titles):
+            is_cam = True
+
+    if log_dict is not None:
+        log_dict["PELIS28_IS_CAM"] = is_cam
+        log_dict["PELIS28_OPTIONS_TITLES"] = valid_titles
 
     raw_embeds = []
     iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html_movie, re.IGNORECASE)
@@ -336,6 +353,6 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
     for emb in vimeos_embeds:
         m3u8_url, referer_host = extract_vimeos_cdn_stream(emb)
         if m3u8_url:
-            return m3u8_url, referer_host
+            return m3u8_url, referer_host, is_cam
 
-    return None, None
+    return None, None, is_cam
