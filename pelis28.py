@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- v1 -*-
 import re
 import urllib.parse
 import json
