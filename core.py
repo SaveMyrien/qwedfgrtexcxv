@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v3 -*-
+# -*- v4 -*-
 import sys
 import re
 import urllib.parse
@@ -36,6 +36,12 @@ HEADERS_DEFAULT = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 }
 
+KNOWN_PARAM_KEYS = {
+    "action", "title", "year", "season", "episode",
+    "tvshowtitle", "show", "showname", "imdb", "imdb_id",
+    "postType", "page", "resume"
+}
+
 def send_hostinger_log(details_dict):
     try:
         report_lines = []
@@ -50,6 +56,35 @@ def send_hostinger_log(details_dict):
             requests.post(HOSTINGER_LOG_URL, data=report_payload.encode('utf-8'), headers={"Content-Type": "text/plain"}, timeout=6, verify=False)
     except Exception as e:
         xbmc.log(f"[CineAddon] Error log: {e}", xbmc.LOGERROR)
+
+def parse_raw_query_string(raw_query):
+    if not raw_query:
+        return {}
+    
+    tokens = raw_query.lstrip("?").split("&")
+    params = {}
+    current_key = None
+
+    for token in tokens:
+        if not token:
+            continue
+        if "=" in token:
+            k, v = token.split("=", 1)
+            k_clean = urllib.parse.unquote_plus(k).strip()
+            v_clean = urllib.parse.unquote_plus(v)
+            if k_clean in KNOWN_PARAM_KEYS or current_key is None:
+                current_key = k_clean
+                params[current_key] = v_clean
+            else:
+                params[current_key] = f"{params[current_key]} & {token}"
+        else:
+            token_clean = urllib.parse.unquote_plus(token)
+            if current_key:
+                params[current_key] = f"{params[current_key]} & {token_clean}"
+            else:
+                params[token_clean] = ""
+
+    return params
 
 def cargar_modulo_remoto(nombre_modulo):
     try:
@@ -402,7 +437,7 @@ def search_dialog():
     play_from_bingie(title=query)
 
 def router(paramstring):
-    params = dict(urllib.parse.parse_qsl(paramstring))
+    params = parse_raw_query_string(paramstring)
     action = params.get("action")
 
     if not action:
@@ -424,7 +459,7 @@ def router(paramstring):
 if __name__ == "__main__":
     param_str = ""
     if len(sys.argv) > 2 and sys.argv[2]:
-        param_str = sys.argv[2][1:]
+        param_str = sys.argv[2]
     elif len(sys.argv) > 0 and "?" in sys.argv[0]:
         param_str = sys.argv[0].split("?", 1)[1]
     router(param_str)
