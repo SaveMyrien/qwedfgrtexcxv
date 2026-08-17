@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v6 -*-
+# -*- v7 -*-
 import sys
 import re
 import urllib.parse
@@ -362,24 +362,46 @@ def build_search_variations(raw_title):
     variations = []
     base_title = raw_title.strip()
     
-    if base_title and base_title not in variations:
+    if not base_title:
+        return variations
+
+    # 1. Si contiene '&', generar la variante prefijo exacta (ej: 'Minions &')
+    if "&" in base_title:
+        parts_and = base_title.split("&")
+        prefix_and = f"{parts_and[0].strip()} &"
+        if prefix_and not in variations:
+            variations.append(prefix_and)
+            
+    # 2. Si contiene '&amp;', generar prefijo con '&'
+    if "&amp;" in base_title:
+        parts_amp = base_title.split("&amp;")
+        prefix_amp = f"{parts_amp[0].strip()} &"
+        if prefix_amp not in variations:
+            variations.append(prefix_amp)
+
+    # 3. Título completo original
+    if base_title not in variations:
         variations.append(base_title)
     
+    # 4. Variante con entidad de texto '&amp;'
     if "&" in base_title and "&amp;" not in base_title:
         amp_title = base_title.replace("&", "&amp;")
         if amp_title not in variations:
             variations.append(amp_title)
             
+    # 5. Variante decodificada
     if "&amp;" in base_title:
         unescaped_title = base_title.replace("&amp;", "&")
         if unescaped_title not in variations:
             variations.append(unescaped_title)
 
+    # 6. Variante limpia sin caracteres especiales
     sanitized = re.sub(r'[:\-–—&]', ' ', base_title).strip()
     sanitized = re.sub(r'\s+', ' ', sanitized)
     if sanitized and sanitized not in variations:
         variations.append(sanitized)
 
+    # 7. Primera palabra como respaldo
     words = sanitized.split()
     if words and words[0] not in variations:
         variations.append(words[0])
@@ -391,7 +413,7 @@ def resolve_movie(title, year=""):
     posts = []
 
     for q in search_queries:
-        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(q)}&postsPerPage=20"
+        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(q)}&postsPerPage=20"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
             fetched_posts = res.json().get("data", {}).get("posts", [])
@@ -451,7 +473,7 @@ def resolve_series(query_candidates, s_num, e_num, effective_year=""):
     used_query = expanded_candidates[0] if expanded_candidates else ""
 
     for candidate_query in expanded_candidates:
-        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(candidate_query)}&postsPerPage=26"
+        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(candidate_query)}&postsPerPage=26"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
             posts = res.json().get("data", {}).get("posts", [])
