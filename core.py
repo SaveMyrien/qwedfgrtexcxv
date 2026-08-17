@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v1 -*-
+# -*- v2 -*-
 import sys
 import re
 import urllib.parse
@@ -33,7 +33,6 @@ TMDB_TV_EXTERNAL_IDS = "https://api.themoviedb.org/3/tv/{tv_id}/external_ids"
 
 HOSTINGER_LOG_URL = "https://blueviolet-moose-134451.hostingersite.com/repo/log.php"
 GITHUB_EMBED69_URL = "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/embed69.py"
-GITHUB_PELIS28_URL = "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/pelis28.py"
 
 HEADERS_DEFAULT = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -82,25 +81,6 @@ def obtener_modulo_embed69():
             return mod
     except Exception as e:
         xbmc.log(f"[LaMovie] Error al descargar embed69.py desde GitHub: {e}", xbmc.LOGERROR)
-
-    return None
-
-def obtener_modulo_pelis28():
-    try:
-        import pelis28
-        return pelis28
-    except Exception:
-        pass
-
-    try:
-        res = requests.get(GITHUB_PELIS28_URL, headers={"User-Agent": "Kodi/LaMovie"}, timeout=10, verify=False)
-        if res.status_code == 200:
-            mod = types.ModuleType("pelis28")
-            exec(res.text, mod.__dict__)
-            sys.modules["pelis28"] = mod
-            return mod
-    except Exception as e:
-        xbmc.log(f"[LaMovie] Error al descargar pelis28.py desde GitHub: {e}", xbmc.LOGERROR)
 
     return None
 
@@ -806,12 +786,6 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         "MODO": "PELICULA"
     }
 
-    final_m3u8 = None
-    final_embed_url = None
-
-    # -------------------------------------------------------------
-    # OPCIÓN 1: LaMovie API
-    # -------------------------------------------------------------
     search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote(clean_title)}&postsPerPage=15"
     
     try:
@@ -832,50 +806,49 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
 
     selected_post = find_best_post_match(posts, clean_title, year)
 
-    if selected_post:
-        post_id = selected_post.get("_id")
-        player_url = f"{API_PLAYER}?postId={post_id}&demo=0"
-        try:
-            res_player = requests.get(player_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
-            embeds = res_player.json().get("data", {}).get("embeds", [])
-        except Exception as e:
-            xbmc.log(f"[CineAddon] Error API Player: {e}", xbmc.LOGERROR)
-            embeds = []
+    if not selected_post:
+        log_data["STATUS"] = "ERROR_PELICULA_NO_ENCONTRADA"
+        send_hostinger_log(log_data)
+        show_cinema_modal(clean_title, year)
+        return
 
-        if embeds:
-            ordered_embeds = []
-            for embed in embeds:
-                url = embed.get("url", "").lower()
-                name = embed.get("server", "").lower()
-                if "vimeos" in url or "lamovie" in name:
-                    ordered_embeds.insert(0, embed)
-                elif "goodstream" in url or "goodstream" in name:
-                    ordered_embeds.append(embed)
+    post_id = selected_post.get("_id")
 
-            if not ordered_embeds:
-                ordered_embeds = embeds
+    player_url = f"{API_PLAYER}?postId={post_id}&demo=0"
+    try:
+        res_player = requests.get(player_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
+        embeds = res_player.json().get("data", {}).get("embeds", [])
+    except Exception as e:
+        xbmc.log(f"[CineAddon] Error API Player: {e}", xbmc.LOGERROR)
+        embeds = []
 
-            for candidate_embed in ordered_embeds:
-                final_m3u8, final_embed_url = extract_vimeos_cdn_stream(candidate_embed.get("url", ""))
-                if final_m3u8:
-                    log_data["PROVEEDOR"] = "LAMOVIE_API"
-                    break
+    if not embeds:
+        log_data["STATUS"] = "ERROR_SIN_EMBEDS"
+        send_hostinger_log(log_data)
+        show_cinema_modal(clean_title, year)
+        return
 
-    # -------------------------------------------------------------
-    # OPCIÓN 2: Fallback Pelis28 (Solo para Películas)
-    # -------------------------------------------------------------
+    ordered_embeds = []
+    for embed in embeds:
+        url = embed.get("url", "").lower()
+        name = embed.get("server", "").lower()
+        if "vimeos" in url or "lamovie" in name:
+            ordered_embeds.insert(0, embed)
+        elif "goodstream" in url or "goodstream" in name:
+            ordered_embeds.append(embed)
+
+    if not ordered_embeds:
+        ordered_embeds = embeds
+
+    final_m3u8 = None
+    final_embed_url = None
+    for candidate_embed in ordered_embeds:
+        final_m3u8, final_embed_url = extract_vimeos_cdn_stream(candidate_embed.get("url", ""))
+        if final_m3u8:
+            break
+
     if not final_m3u8:
-        xbmc.log(f"[CineAddon] LaMovie falló para '{clean_title}'. Probando Pelis28...", xbmc.LOGINFO)
-        mod_pelis28 = obtener_modulo_pelis28()
-        if mod_pelis28 and hasattr(mod_pelis28, "extract_pelis28_movie_stream"):
-            m3u8_p28, embed_p28 = mod_pelis28.extract_pelis28_movie_stream(clean_title, str(year).strip(), log_dict=log_data)
-            if m3u8_p28:
-                final_m3u8 = m3u8_p28
-                final_embed_url = embed_p28
-                log_data["PROVEEDOR"] = "PELIS28"
-
-    if not final_m3u8:
-        log_data["STATUS"] = "ERROR_PELICULA_NO_DISPONIBLE"
+        log_data["STATUS"] = "ERROR_EXTRAER_M3U8"
         send_hostinger_log(log_data)
         show_cinema_modal(clean_title, year)
         return
