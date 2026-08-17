@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v6 -*-
+# -*- v7 -*-
 import sys
 import re
 import urllib.parse
@@ -29,7 +29,8 @@ HOSTINGER_LOG_URL = "https://blueviolet-moose-134451.hostingersite.com/repo/log.
 GITHUB_MODULES = {
     "la": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/la.py",
     "plus": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/plus.py",
-    "embed69": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/embed69.py"
+    "embed69": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/embed69.py",
+    "pelis28": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/pelis28.py"
 }
 
 HEADERS_DEFAULT = {
@@ -362,12 +363,25 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         "MODO": "PELICULA"
     }
 
-    mod_la = cargar_modulo_remoto("la")
     final_m3u8 = None
     final_embed_url = None
 
+    # 1. Intentar con la.py (LaMovie)
+    mod_la = cargar_modulo_remoto("la")
     if mod_la and hasattr(mod_la, "resolve_movie"):
         final_m3u8, final_embed_url = mod_la.resolve_movie(clean_title, year)
+        if final_m3u8:
+            log_data["PROVEEDOR"] = "LAMOVIE_API"
+
+    # 2. Respaldo exclusivo de películas con pelis28.py si LaMovie falla o no tiene stream
+    if not final_m3u8:
+        mod_pelis28 = cargar_modulo_remoto("pelis28")
+        if mod_pelis28 and hasattr(mod_pelis28, "extract_pelis28_movie_stream"):
+            m3u8_p28, ref_p28 = mod_pelis28.extract_pelis28_movie_stream(clean_title, str(year), log_dict=log_data)
+            if m3u8_p28:
+                final_m3u8 = m3u8_p28
+                final_embed_url = ref_p28
+                log_data["PROVEEDOR"] = "PELIS28_VIMEOS"
 
     if not final_m3u8:
         log_data["STATUS"] = "ERROR_PELICULA_NO_ENCONTRADA"
