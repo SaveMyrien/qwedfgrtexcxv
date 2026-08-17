@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- v1 -*-
 import re
 import urllib.parse
 import json
@@ -26,6 +27,34 @@ def clean_url(url):
     url = url.strip().replace("\\/", "/")
     url = re.sub(r'["\'\\].*$', '', url)
     return url.replace('&amp;', '&')
+
+def sanitize_m3u8_url(url):
+    if not url:
+        return None
+    clean = url.strip()
+    clean = re.sub(r'["\'\\].*$', '', clean)
+    clean = clean.replace('&amp;', '&')
+    return clean
+
+def verificar_stream_online(m3u8_url, referer_host=None):
+    if not m3u8_url or not m3u8_url.startswith("http"):
+        return False
+    try:
+        parsed = urllib.parse.urlparse(m3u8_url)
+        origin_val = f"{parsed.scheme}://{parsed.netloc}"
+        ref_val = referer_host if referer_host else f"{origin_val}/"
+
+        headers = {
+            "User-Agent": HEADERS_DEFAULT["User-Agent"],
+            "Referer": ref_val,
+            "Origin": origin_val
+        }
+        res = requests.get(m3u8_url, headers=headers, timeout=3.5, verify=False)
+        if res.status_code == 200 and ("#EXTM3U" in res.text or "#EXT-X-" in res.text):
+            return True
+    except Exception:
+        pass
+    return False
 
 def unpack_dean_edwards_js_exact(packed_code):
     try:
@@ -68,34 +97,6 @@ def unpack_dean_edwards_js_exact(packed_code):
     except Exception:
         return ""
 
-def sanitize_m3u8_url(url):
-    if not url:
-        return None
-    clean = url.strip()
-    clean = re.sub(r'["\'\\].*$', '', clean)
-    clean = clean.replace('&amp;', '&')
-    return clean
-
-def verificar_stream_online(m3u8_url, referer_host=None):
-    if not m3u8_url or not m3u8_url.startswith("http"):
-        return False
-    try:
-        parsed = urllib.parse.urlparse(m3u8_url)
-        origin_val = f"{parsed.scheme}://{parsed.netloc}"
-        ref_val = referer_host if referer_host else f"{origin_val}/"
-
-        headers = {
-            "User-Agent": HEADERS_DEFAULT["User-Agent"],
-            "Referer": ref_val,
-            "Origin": origin_val
-        }
-        res = requests.get(m3u8_url, headers=headers, timeout=3.5, verify=False)
-        if res.status_code == 200 and ("#EXTM3U" in res.text or "#EXT-X-" in res.text):
-            return True
-    except Exception:
-        pass
-    return False
-
 def extract_vimeos_cdn_stream(embed_url):
     try:
         if not embed_url:
@@ -110,12 +111,12 @@ def extract_vimeos_cdn_stream(embed_url):
         if res_embed.status_code != 200:
             return None, None
 
-        html = res_embed.text
+        html_text = res_embed.text
 
         try:
             random_uuid = str(uuid.uuid4())
             ts_now = int(time.time())
-            info_url = f"https://anal.vimeos.net/info?site=lamovie.link&uuid={random_uuid}&ts={ts_now}&isIframe=false&parentUrl={urllib.parse.quote(target_url)}"
+            info_url = f"https://anal.vimeos.net/info?site=pelis28.net&uuid={random_uuid}&ts={ts_now}&isIframe=false&parentUrl={urllib.parse.quote(target_url)}"
             headers_info = dict(HEADERS_DEFAULT)
             headers_info["Referer"] = target_url
             headers_info["Origin"] = "https://vimeos.net"
@@ -123,7 +124,7 @@ def extract_vimeos_cdn_stream(embed_url):
         except Exception:
             pass
 
-        unpacked_js = unpack_dean_edwards_js_exact(html)
+        unpacked_js = unpack_dean_edwards_js_exact(html_text)
         raw_m3u8 = None
         if unpacked_js:
             file_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', unpacked_js, re.I)
@@ -141,8 +142,8 @@ def extract_vimeos_cdn_stream(embed_url):
                     raw_m3u8 = simple_match.group(1)
 
         if not raw_m3u8:
-            html_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html, re.I) or \
-                         re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', html, re.I)
+            html_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html_text, re.I) or \
+                         re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', html_text, re.I)
             if html_match and html_match.group(1):
                 raw_m3u8 = html_match.group(1)
 
@@ -185,10 +186,6 @@ def extract_vimeos_cdn_stream(embed_url):
                 "https://p6.vimeos.zip",
                 "https://p1.vimeos.zip"
             ]
-
-            headers_stream = dict(HEADERS_DEFAULT)
-            headers_stream["Referer"] = target_url
-            headers_stream["Origin"] = "https://vimeos.net"
 
             for host in cdn_hosts:
                 candidate_url = f"{host}{base_path}{file_id}_{selected_quality}/index-v1-a1.m3u8?{final_query}"
@@ -254,7 +251,12 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
     if not query_title:
         return None, None
 
-    url_search = f"{BASE_URL}/?s={urllib.parse.quote(query_title)}"
+    search_term = query_title.strip()
+    if "&" in search_term or "&amp;" in search_term:
+        clean_cut = search_term.replace("&amp;", "&")
+        search_term = clean_cut.split("&")[0].strip()
+
+    url_search = f"{BASE_URL}/?s={urllib.parse.quote(search_term)}"
     if log_dict is not None:
         log_dict["PELIS28_SEARCH_URL"] = url_search
 
