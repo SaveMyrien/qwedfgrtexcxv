@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- v6 -*-
 import sys
 import re
 import urllib.parse
@@ -178,7 +179,6 @@ def ask_cam_quality_playback(movie_title):
         "sin embargo, puedes verla en calidad de cine. La decisión es tuya.\n"
         "Tan pronto esté disponible en HD, seremos los primeros en actualizarla."
     )
-    # Retorna True si pulsa 'Ver de todas formas' / Aceptar
     return dialog.yesno(
         f"[COLOR yellow]{movie_title}[/COLOR]",
         msg,
@@ -412,7 +412,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         show_cinema_modal(clean_title, year)
         return
 
-    # Si la fuente es calidad de cine (LATINO sin HD), pedir confirmación
+    # Si la calidad es exclusivamente de cine (LATINO sin HD), pedir confirmación
     if is_cam_quality:
         wants_to_play = ask_cam_quality_playback(clean_title)
         if not wants_to_play:
