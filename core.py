@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- v6 -*-
 import sys
 import re
 import urllib.parse
@@ -41,19 +42,6 @@ KNOWN_PARAM_KEYS = {
     "tvshowtitle", "show", "showname", "imdb", "imdb_id",
     "postType", "page", "resume"
 }
-
-def show_busy_dialog():
-    try:
-        xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
-    except Exception:
-        pass
-
-def hide_busy_dialog():
-    try:
-        xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
-        xbmc.executebuiltin("Dialog.Close(busydialog)")
-    except Exception:
-        pass
 
 def send_hostinger_log(details_dict):
     try:
@@ -157,15 +145,12 @@ def execute_play(m3u8_url, title="", embed_referer=None):
     play_item.setProperty("inputstream.adaptive.stream_headers", encoded_headers)
     play_item.setProperty("inputstream.adaptive.manifest_headers", encoded_headers)
 
-    hide_busy_dialog()
-
     if HANDLE >= 0:
         xbmcplugin.setResolvedUrl(HANDLE, True, listitem=play_item)
     else:
         xbmc.Player().play(final_stream_url, play_item)
 
 def show_cinema_modal(movie_title, movie_year=""):
-    hide_busy_dialog()
     if HANDLE >= 0:
         xbmcplugin.setResolvedUrl(HANDLE, False, listitem=xbmcgui.ListItem())
 
@@ -188,22 +173,18 @@ def show_cinema_modal(movie_title, movie_year=""):
     dialog.ok(title_header, line_msg)
 
 def ask_cam_quality_playback(movie_title):
-    hide_busy_dialog()
     dialog = xbmcgui.Dialog()
     msg = (
         "Esta película aún no está disponible en alta definición,\n"
         "sin embargo, puedes verla en calidad de cine. La decisión es tuya.\n"
         "Tan pronto esté disponible en HD, seremos los primeros en actualizarla."
     )
-    res = dialog.yesno(
+    return dialog.yesno(
         f"[COLOR yellow]{movie_title}[/COLOR]",
         msg,
         yeslabel="Ver en calidad cine",
         nolabel="Cancelar"
     )
-    if res:
-        show_busy_dialog()
-    return res
 
 def get_tmdb_series_info(title, max_year=""):
     if not title or title == "_":
@@ -253,8 +234,6 @@ def get_tmdb_series_info(title, max_year=""):
     return None, None, None, None
 
 def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", **kwargs):
-    show_busy_dialog()
-
     clean_title = (title or "").strip()
     series_name = (tvshowtitle or kwargs.get("show") or kwargs.get("showname") or "").strip()
 
@@ -433,11 +412,10 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         show_cinema_modal(clean_title, year)
         return
 
-    # Si la calidad es de cine (LATINO sin HD), pedir confirmación
+    # Si la calidad es exclusivamente de cine (LATINO sin HD), pedir confirmación
     if is_cam_quality:
         wants_to_play = ask_cam_quality_playback(clean_title)
         if not wants_to_play:
-            hide_busy_dialog()
             if HANDLE >= 0:
                 xbmcplugin.setResolvedUrl(HANDLE, False, listitem=xbmcgui.ListItem())
             log_data["STATUS"] = "CANCELADO_POR_USUARIO_CALIDAD_CINE"
