@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- v1 -*-
 import re
 import urllib.parse
 import json
@@ -303,7 +304,7 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
     except Exception:
         return None, None, False
 
-    # Detectar si las opciones disponibles solo dicen 'LATINO' (calidad de cine) y no 'HD'
+    # Extraer las opciones de reproductor para validar si tienen HD
     options_tags = re.findall(r"<li[^>]*class=['\"][^'\"]*dooplay_player_option[^'\"]*['\"][^>]*>[\s\S]*?<span class=['\"]title['\"]>([^<]+)</span>", html_movie)
     valid_titles = []
     for opt_t in options_tags:
@@ -311,6 +312,7 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
         if "TRAILER" not in t_clean:
             valid_titles.append(t_clean)
 
+    # Si dice 'LATINO HD' o cualquier opción incluye 'HD', is_cam es False
     is_cam = False
     if valid_titles:
         has_hd = any("HD" in t for t in valid_titles)
