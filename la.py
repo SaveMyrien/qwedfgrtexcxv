@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v1 -*-
+# -*- asdasdasd -*-
 import sys
 import re
 import urllib.parse
@@ -12,7 +12,7 @@ import xbmc
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_BASE_URL = "https://lamovie.org"
+API_BASE_URL = "https://misitio.com"
 API_SEARCH = f"{API_BASE_URL}/wp-api/v1/search"
 API_EPISODES = f"{API_BASE_URL}/wp-api/v1/single/episodes/list"
 API_PLAYER = f"{API_BASE_URL}/wp-api/v1/player"
@@ -21,8 +21,8 @@ HEADERS_DEFAULT = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-    "Referer": "https://lamovie.org/",
-    "Origin": "https://lamovie.org",
+    "Referer": "https://misitio.com/",
+    "Origin": "https://misitio.com",
     "Cache-Control": "no-cache"
 }
 
@@ -222,21 +222,21 @@ def extract_year_from_post(post):
     match = re.search(r'\((\d{4})\)', raw_title)
     if match:
         return match.group(1)
-    
+
     release_date = str(post.get("release_date", "")).strip()
     if len(release_date) >= 4 and release_date[:4].isdigit():
         return release_date[:4]
-    
+
     post_year = str(post.get("year", "")).strip()
     if post_year.isdigit() and len(post_year) == 4:
         return post_year
-    
+
     return ""
 
 def find_best_post_match(posts, search_title, target_year=""):
     if not posts:
         return None
-    
+
     clean_target = normalize_string(search_title)
     clean_target_tokens = clean_target.replace(" ", "")
     target_year = str(target_year).strip()
@@ -298,7 +298,7 @@ def find_best_post_match(posts, search_title, target_year=""):
 def find_best_series_match(posts, search_title, target_year=""):
     if not posts:
         return None
-    
+
     clean_target = normalize_string(search_title)
     clean_target_tokens = clean_target.replace(" ", "")
     target_year = str(target_year).strip()
@@ -418,47 +418,66 @@ def get_catalog(post_type="movies", page=1):
         return []
 
 def build_search_variations(raw_title):
+    """
+    Genera variaciones de búsqueda en orden de prioridad.
+
+    FIX: antes solo probaba "primera palabra sola" y luego el
+    "título completo", saltándose combinaciones intermedias como
+    "Harry Potter" (2 palabras). Ahora se agrega una progresión de
+    palabras (2, 3, 4...) ANTES de caer a la palabra suelta, que es
+    la variante más ruidosa y debería usarse como casi último recurso.
+    También se agrega el título completo normalizado (sin tildes/
+    puntuación) como red de seguridad final, por si el buscador del
+    sitio es sensible a acentos.
+    """
     variations = []
     base_title = raw_title.strip()
-    
+
     if not base_title:
         return variations
 
-    # PRIORIDAD 1: Si contiene dos puntos ':' (ej. "Spider-Man: Sin camino a casa")
+    def add(v):
+        v = (v or "").strip()
+        if v and v not in variations:
+            variations.append(v)
+
+    # PRIORIDAD 1: si contiene dos puntos ':' (ej. "Spider-Man: Sin camino a casa")
     if ":" in base_title:
-        parts = base_title.split(":", 1)
-        part_before = parts[0].strip()
-        part_after = parts[1].strip()
-        if part_after and part_after not in variations:
-            variations.append(part_after)
-        if part_before and part_before not in variations:
-            variations.append(part_before)
+        part_before, part_after = base_title.split(":", 1)
+        add(part_after)
+        add(part_before)
 
-    # PRIORIDAD 2: Si contiene guión con espacios ' - '
+    # PRIORIDAD 2: si contiene guión con espacios ' - '
     if " - " in base_title:
-        parts_dash = base_title.split(" - ", 1)
-        dash_after = parts_dash[1].strip()
-        dash_before = parts_dash[0].strip()
-        if dash_after and dash_after not in variations:
-            variations.append(dash_after)
-        if dash_before and dash_before not in variations:
-            variations.append(dash_before)
+        part_before, part_after = base_title.split(" - ", 1)
+        add(part_after)
+        add(part_before)
 
-    # PRIORIDAD 3: Si contiene '&' o '&amp;'
+    # PRIORIDAD 3: si contiene '&' o '&amp;'
     if "&" in base_title or "&amp;" in base_title:
         raw_cut = base_title.replace("&amp;", "&")
-        first_part = raw_cut.split("&")[0].strip()
-        if first_part and first_part not in variations:
-            variations.append(first_part)
+        add(raw_cut.split("&")[0])
 
-    # PRIORIDAD 4: Primera palabra aislada
-    first_word = base_title.split()[0] if base_title else ""
-    if first_word and first_word not in variations:
-        variations.append(first_word)
+    # PRIORIDAD 4 (NUEVO): progresión de palabras, de 2 en adelante.
+    # Esto es lo que permite encontrar "Harry Potter" en vez de
+    # saltar directo de "Harry" al título completo con subtítulo.
+    words = base_title.split()
+    for n in range(2, len(words)):  # deja fuera 1 palabra (va después) y el total (va al final)
+        add(" ".join(words[:n]))
 
-    # PRIORIDAD 5: Título completo
-    if base_title not in variations:
-        variations.append(base_title)
+    # PRIORIDAD 5: primera palabra aislada (ahora es fallback, no el primer intento)
+    if words:
+        add(words[0])
+
+    # PRIORIDAD 6: título completo tal cual vino
+    add(base_title)
+
+    # PRIORIDAD 7 (NUEVO): título completo normalizado, sin tildes ni
+    # puntuación, como último recurso si el buscador del sitio no
+    # matchea bien con acentos/símbolos.
+    normalized_full = normalize_string(base_title)
+    if normalized_full:
+        add(normalized_full.title())
 
     return variations
 
@@ -467,7 +486,10 @@ def resolve_movie(title, year=""):
     posts = []
 
     for q in search_queries:
-        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(q)}&postsPerPage=20"
+        # postsPerPage subido de 20 a 30: no se pagina, pero cubre
+        # el caso de hasta ~25-30 títulos parecidos en una sola
+        # respuesta, que es el techo que se espera para este catálogo.
+        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(q)}&postsPerPage=30"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
             fetched_posts = res.json().get("data", {}).get("posts", [])
@@ -527,7 +549,8 @@ def resolve_series(query_candidates, s_num, e_num, effective_year=""):
     used_query = expanded_candidates[0] if expanded_candidates else ""
 
     for candidate_query in expanded_candidates:
-        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(candidate_query)}&postsPerPage=26"
+        # postsPerPage subido de 26 a 30 por la misma razón que en resolve_movie
+        search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(candidate_query)}&postsPerPage=30"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
             posts = res.json().get("data", {}).get("posts", [])
