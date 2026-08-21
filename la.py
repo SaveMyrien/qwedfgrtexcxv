@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- v1 -*-
 import sys
 import re
 import urllib.parse
@@ -242,12 +243,29 @@ def find_best_post_match(posts, search_title, target_year=""):
 
     first_keyword = clean_target.split()[0] if clean_target else ""
 
+    subtitles = []
+    if ":" in search_title:
+        sub_part = normalize_string(search_title.split(":", 1)[1])
+        if sub_part:
+            subtitles.append(sub_part)
+    if " - " in search_title:
+        sub_part = normalize_string(search_title.split(" - ", 1)[1])
+        if sub_part:
+            subtitles.append(sub_part)
+
     if target_year:
         for post in posts:
             p_clean = normalize_string(post.get("title", ""))
             p_year = extract_year_from_post(post)
             if clean_target_tokens == p_clean.replace(" ", "") and p_year == target_year:
                 return post
+
+        for post in posts:
+            p_clean = normalize_string(post.get("title", ""))
+            p_year = extract_year_from_post(post)
+            for sub in subtitles:
+                if sub and (sub in p_clean or p_clean in sub) and p_year == target_year:
+                    return post
 
         for post in posts:
             p_clean = normalize_string(post.get("title", ""))
@@ -269,6 +287,9 @@ def find_best_post_match(posts, search_title, target_year=""):
             continue
         if clean_target_tokens == p_clean.replace(" ", ""):
             return post
+        for sub in subtitles:
+            if sub and (sub in p_clean or p_clean in sub):
+                return post
         if first_keyword and first_keyword in p_clean.split():
             return post
 
@@ -283,12 +304,29 @@ def find_best_series_match(posts, search_title, target_year=""):
     target_year = str(target_year).strip()
     first_keyword = clean_target.split()[0] if clean_target else ""
 
+    subtitles = []
+    if ":" in search_title:
+        sub_part = normalize_string(search_title.split(":", 1)[1])
+        if sub_part:
+            subtitles.append(sub_part)
+    if " - " in search_title:
+        sub_part = normalize_string(search_title.split(" - ", 1)[1])
+        if sub_part:
+            subtitles.append(sub_part)
+
     if target_year:
         for post in posts:
             p_clean = normalize_string(post.get("title", ""))
             p_year = extract_year_from_post(post)
             if clean_target_tokens == p_clean.replace(" ", "") and p_year == target_year:
                 return post
+
+        for post in posts:
+            p_clean = normalize_string(post.get("title", ""))
+            p_year = extract_year_from_post(post)
+            for sub in subtitles:
+                if sub and (sub in p_clean or p_clean in sub) and p_year == target_year:
+                    return post
 
         for post in posts:
             p_clean = normalize_string(post.get("title", ""))
@@ -309,6 +347,9 @@ def find_best_series_match(posts, search_title, target_year=""):
         p_clean = normalize_string(post.get("title", ""))
         if clean_target_tokens == p_clean.replace(" ", ""):
             return post
+        for sub in subtitles:
+            if sub and (sub in p_clean or p_clean in sub):
+                return post
         if first_keyword and first_keyword in p_clean.split():
             return post
 
@@ -383,19 +424,39 @@ def build_search_variations(raw_title):
     if not base_title:
         return variations
 
-    # PRIORIDAD 1: Si contiene '&' o '&amp;', buscar UNICAMENTE la primera palabra/parte antes del '&'
+    # PRIORIDAD 1: Si contiene dos puntos ':' (ej. "Spider-Man: Sin camino a casa")
+    if ":" in base_title:
+        parts = base_title.split(":", 1)
+        part_before = parts[0].strip()
+        part_after = parts[1].strip()
+        if part_after and part_after not in variations:
+            variations.append(part_after)
+        if part_before and part_before not in variations:
+            variations.append(part_before)
+
+    # PRIORIDAD 2: Si contiene guión con espacios ' - '
+    if " - " in base_title:
+        parts_dash = base_title.split(" - ", 1)
+        dash_after = parts_dash[1].strip()
+        dash_before = parts_dash[0].strip()
+        if dash_after and dash_after not in variations:
+            variations.append(dash_after)
+        if dash_before and dash_before not in variations:
+            variations.append(dash_before)
+
+    # PRIORIDAD 3: Si contiene '&' o '&amp;'
     if "&" in base_title or "&amp;" in base_title:
         raw_cut = base_title.replace("&amp;", "&")
         first_part = raw_cut.split("&")[0].strip()
         if first_part and first_part not in variations:
             variations.append(first_part)
 
-    # PRIORIDAD 2: Primera palabra aislada
+    # PRIORIDAD 4: Primera palabra aislada
     first_word = base_title.split()[0] if base_title else ""
     if first_word and first_word not in variations:
         variations.append(first_word)
 
-    # PRIORIDAD 3: Título completo
+    # PRIORIDAD 5: Título completo
     if base_title not in variations:
         variations.append(base_title)
 
