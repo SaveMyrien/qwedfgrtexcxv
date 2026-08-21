@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*-aaaaaaa -*-
+# -*- v10 -*-
 import sys
 import re
 import urllib.parse
@@ -233,6 +233,41 @@ def get_tmdb_series_info(title, max_year=""):
 
     return None, None, None, None
 
+def get_movie_title_variations(raw_title):
+    variations = []
+    base_title = (raw_title or "").strip()
+    if not base_title:
+        return variations
+
+    if base_title not in variations:
+        variations.append(base_title)
+
+    if ":" in base_title:
+        parts = base_title.split(":", 1)
+        sub_part = parts[1].strip()
+        main_part = parts[0].strip()
+        if sub_part and sub_part not in variations:
+            variations.append(sub_part)
+        if main_part and main_part not in variations:
+            variations.append(main_part)
+
+    if " - " in base_title:
+        parts = base_title.split(" - ", 1)
+        sub_part = parts[1].strip()
+        main_part = parts[0].strip()
+        if sub_part and sub_part not in variations:
+            variations.append(sub_part)
+        if main_part and main_part not in variations:
+            variations.append(main_part)
+
+    if "&" in base_title or "&amp;" in base_title:
+        clean_amp = base_title.replace("&amp;", "&")
+        first_part = clean_amp.split("&")[0].strip()
+        if first_part and first_part not in variations:
+            variations.append(first_part)
+
+    return variations
+
 def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", **kwargs):
     clean_title = (title or "").strip()
     series_name = (tvshowtitle or kwargs.get("show") or kwargs.get("showname") or "").strip()
@@ -381,30 +416,40 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
     final_embed_url = None
     is_cam_quality = False
 
+    movie_queries = get_movie_title_variations(clean_title)
+
     # 1. Intentar con la.py (LaMovie)
     mod_la = cargar_modulo_remoto("la")
     if mod_la and hasattr(mod_la, "resolve_movie"):
-        final_m3u8, final_embed_url = mod_la.resolve_movie(clean_title, year)
-        if final_m3u8:
-            log_data["PROVEEDOR"] = "LAMOVIE_API"
+        for q_movie in movie_queries:
+            m3u8_la, ref_la = mod_la.resolve_movie(q_movie, year)
+            if m3u8_la:
+                final_m3u8 = m3u8_la
+                final_embed_url = ref_la
+                log_data["PROVEEDOR"] = "LAMOVIE_API"
+                log_data["USED_MOVIE_QUERY"] = q_movie
+                break
 
     # 2. Respaldo exclusivo de películas con pelis28.py
     if not final_m3u8:
         mod_pelis28 = cargar_modulo_remoto("pelis28")
         if mod_pelis28 and hasattr(mod_pelis28, "extract_pelis28_movie_stream"):
-            res_p28 = mod_pelis28.extract_pelis28_movie_stream(clean_title, str(year), log_dict=log_data)
-            if isinstance(res_p28, tuple) and len(res_p28) == 3:
-                m3u8_p28, ref_p28, is_cam_p28 = res_p28
-                is_cam_quality = bool(is_cam_p28)
-            elif isinstance(res_p28, tuple) and len(res_p28) == 2:
-                m3u8_p28, ref_p28 = res_p28
-            else:
-                m3u8_p28, ref_p28 = None, None
+            for q_movie in movie_queries:
+                res_p28 = mod_pelis28.extract_pelis28_movie_stream(q_movie, str(year), log_dict=log_data)
+                if isinstance(res_p28, tuple) and len(res_p28) == 3:
+                    m3u8_p28, ref_p28, is_cam_p28 = res_p28
+                    is_cam_quality = bool(is_cam_p28)
+                elif isinstance(res_p28, tuple) and len(res_p28) == 2:
+                    m3u8_p28, ref_p28 = res_p28
+                else:
+                    m3u8_p28, ref_p28 = None, None
 
-            if m3u8_p28:
-                final_m3u8 = m3u8_p28
-                final_embed_url = ref_p28
-                log_data["PROVEEDOR"] = "PELIS28_VIMEOS"
+                if m3u8_p28:
+                    final_m3u8 = m3u8_p28
+                    final_embed_url = ref_p28
+                    log_data["PROVEEDOR"] = "PELIS28_VIMEOS"
+                    log_data["USED_MOVIE_QUERY"] = q_movie
+                    break
 
     if not final_m3u8:
         log_data["STATUS"] = "ERROR_PELICULA_NO_ENCONTRADA"
