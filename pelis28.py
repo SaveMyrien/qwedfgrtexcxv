@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- finala -*-
 import re
 import urllib.parse
 import json
@@ -48,10 +47,13 @@ def verificar_stream_online(m3u8_url, referer_host=None):
             "User-Agent": HEADERS_DEFAULT["User-Agent"],
             "Referer": ref_val,
             "Origin": origin_val,
-            "Accept": "*/*"
+            "Accept": "*/*",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "cross-site"
         }
-        res = requests.get(m3u8_url, headers=headers, timeout=4.5, verify=False)
-        if res.status_code == 200 and ("#EXTM3U" in res.text or "#EXT-X-" in res.text or len(res.content) > 30):
+        res = requests.get(m3u8_url, headers=headers, timeout=6.0, verify=False)
+        if res.status_code == 200 and ("#EXTM3U" in res.text or "#EXT-X-" in res.text or len(res.content) > 20):
             return True
     except Exception:
         pass
@@ -134,9 +136,9 @@ def extract_vimeos_cdn_stream(embed_url):
         unpacked_js = unpack_dean_edwards_js_exact(html_text)
         search_corpus = f"{unpacked_js}\n{html_text}"
 
-        raw_m3u8 = None
+        all_found_m3u8 = []
 
-        m3u8_patterns = [
+        patterns = [
             r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
             r'src\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
             r'["\'](https?://[^"\'<>\s\\]+?\.m3u8\?[^"\'<>\s\\]+)["\']',
@@ -145,65 +147,67 @@ def extract_vimeos_cdn_stream(embed_url):
             r'(https?://[^\s"\'<>\\]+?\.m3u8)'
         ]
 
-        for pat in m3u8_patterns:
-            m = re.search(pat, search_corpus, re.IGNORECASE)
-            if m and m.group(1):
-                raw_m3u8 = m.group(1)
-                break
+        for pat in patterns:
+            matches = re.findall(pat, search_corpus, re.IGNORECASE)
+            for m in matches:
+                clean_m = sanitize_m3u8_url(m)
+                if clean_m and clean_m not in all_found_m3u8:
+                    all_found_m3u8.append(clean_m)
 
-        clean_master = sanitize_m3u8_url(raw_m3u8)
-        if not clean_master:
-            return None, None
+        for candidate_direct in all_found_m3u8:
+            pattern_urlset = r'(/hls2/\d+/\d+/)([a-zA-Z0-9_-]+)_,?([a-zA-Z0-9,]*),?\.urlset/master\.m3u8(\?.*)?'
+            match_u = re.search(pattern_urlset, candidate_direct)
 
-        pattern_urlset = r'(/hls2/\d+/\d+/)([a-zA-Z0-9_-]+)_,?([a-zA-Z0-9,]*),?\.urlset/master\.m3u8(\?.*)?'
-        match_u = re.search(pattern_urlset, clean_master)
+            if match_u:
+                base_path = match_u.group(1)
+                file_id = match_u.group(2)
+                qualities_str = match_u.group(3)
+                query_raw = (match_u.group(4) or "").lstrip("?")
 
-        if match_u:
-            base_path = match_u.group(1)
-            file_id = match_u.group(2)
-            qualities_str = match_u.group(3)
-            query_raw = (match_u.group(4) or "").lstrip("?")
+                parsed_master = urllib.parse.urlparse(candidate_direct)
+                server_match = re.search(r'^(s\d+)\.', parsed_master.netloc)
+                server_id = server_match.group(1) if server_match else "s11"
 
-            parsed_master = urllib.parse.urlparse(clean_master)
-            server_match = re.search(r'^(s\d+)\.', parsed_master.netloc)
-            server_id = server_match.group(1) if server_match else "s11"
+                q_params = urllib.parse.parse_qs(query_raw)
+                if "srv" not in q_params:
+                    q_params["srv"] = [server_id]
 
-            q_params = urllib.parse.parse_qs(query_raw)
-            if "srv" not in q_params:
-                q_params["srv"] = [server_id]
+                final_query = urllib.parse.urlencode(q_params, doseq=True)
 
-            final_query = urllib.parse.urlencode(q_params, doseq=True)
+                qualities = [q for q in qualities_str.split(',') if q]
+                priority_order = ['x', 'h', 'n', 'l']
+                selected_qualities = []
+                for q_candidate in priority_order:
+                    if q_candidate in qualities:
+                        selected_qualities.append(q_candidate)
 
-            qualities = [q for q in qualities_str.split(',') if q]
-            priority_order = ['x', 'h', 'n', 'l']
-            selected_qualities = []
-            for q_candidate in priority_order:
-                if q_candidate in qualities:
-                    selected_qualities.append(q_candidate)
+                if not selected_qualities:
+                    selected_qualities = ['h', 'n', 'l', 'x']
 
-            if not selected_qualities:
-                selected_qualities = ['h', 'n', 'l']
+                cdn_hosts = [
+                    f"{parsed_master.scheme}://{parsed_master.netloc}",
+                    "https://p3.vimeos.zip",
+                    "https://p2.vimeos.zip",
+                    "https://p4.vimeos.zip",
+                    "https://p6.vimeos.zip",
+                    "https://p1.vimeos.zip",
+                    "https://p5.vimeos.zip",
+                    "https://p3.vimeos.net",
+                    "https://p2.vimeos.net",
+                    "https://p1.vimeos.net"
+                ]
 
-            cdn_hosts = [
-                f"{parsed_master.scheme}://{parsed_master.netloc}",
-                "https://p3.vimeos.zip",
-                "https://p2.vimeos.zip",
-                "https://p4.vimeos.zip",
-                "https://p6.vimeos.zip",
-                "https://p1.vimeos.zip",
-                "https://p5.vimeos.zip",
-                "https://p3.vimeos.net",
-                "https://p2.vimeos.net"
-            ]
+                for q_sel in selected_qualities:
+                    for host in cdn_hosts:
+                        reconstructed_url = f"{host}{base_path}{file_id}_{q_sel}/index-v1-a1.m3u8?{final_query}"
+                        if verificar_stream_online(reconstructed_url, target_url):
+                            return reconstructed_url, target_url
 
-            for q_sel in selected_qualities:
-                for host in cdn_hosts:
-                    candidate_url = f"{host}{base_path}{file_id}_{q_sel}/index-v1-a1.m3u8?{final_query}"
-                    if verificar_stream_online(candidate_url, target_url):
-                        return candidate_url, target_url
+            if verificar_stream_online(candidate_direct, target_url):
+                return candidate_direct, target_url
 
-        if verificar_stream_online(clean_master, target_url):
-            return clean_master, target_url
+        if all_found_m3u8:
+            return all_found_m3u8[0], target_url
 
     except Exception:
         pass
