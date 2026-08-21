@@ -40,7 +40,7 @@ HEADERS_DEFAULT = {
 KNOWN_PARAM_KEYS = {
     "action", "title", "year", "season", "episode",
     "tvshowtitle", "show", "showname", "imdb", "imdb_id",
-    "postType", "page", "resume"
+    "tmdb", "tmdb_id", "postType", "page", "resume"
 }
 
 def send_hostinger_log(details_dict):
@@ -412,7 +412,6 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         show_cinema_modal(clean_title, year)
         return
 
-    # Si la calidad es exclusivamente de cine (LATINO sin HD), pedir confirmación
     if is_cam_quality:
         wants_to_play = ask_cam_quality_playback(clean_title)
         if not wants_to_play:
@@ -501,7 +500,7 @@ def router(paramstring):
             year=params.get("year", ""),
             season=params.get("season", ""),
             episode=params.get("episode", ""),
-            tvshowtitle=params.get("tvshowtitle", params.get("show", "")),
+            tvshowtitle=params.get("tvshowtitle", params.get("show", params.get("showname", ""))),
             imdb=params.get("imdb", params.get("imdb_id", ""))
         )
     elif action == "show_catalog":
