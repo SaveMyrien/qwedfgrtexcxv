@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- asdasdasd -*-
+# -*-v5 -*-
 import sys
 import re
 import urllib.parse
@@ -12,7 +12,7 @@ import xbmc
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_BASE_URL = "https://misitio.com"
+API_BASE_URL = "https://lamovie.org"
 API_SEARCH = f"{API_BASE_URL}/wp-api/v1/search"
 API_EPISODES = f"{API_BASE_URL}/wp-api/v1/single/episodes/list"
 API_PLAYER = f"{API_BASE_URL}/wp-api/v1/player"
@@ -21,8 +21,8 @@ HEADERS_DEFAULT = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-    "Referer": "https://misitio.com/",
-    "Origin": "https://misitio.com",
+    "Referer": "https://lamovie.org/",
+    "Origin": "https://lamovie.org",
     "Cache-Control": "no-cache"
 }
 
