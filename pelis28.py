@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- finala -*-
 import re
 import urllib.parse
 import json
@@ -13,7 +14,7 @@ BASE_URL = "https://ver.pelis28.net"
 
 HEADERS_DEFAULT = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "*/*",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     "Referer": "https://ver.pelis28.net/",
     "Origin": "https://ver.pelis28.net",
@@ -30,7 +31,7 @@ def clean_url(url):
 def sanitize_m3u8_url(url):
     if not url:
         return None
-    clean = url.strip()
+    clean = url.strip().replace("\\/", "/")
     clean = re.sub(r'["\'\\].*$', '', clean)
     clean = clean.replace('&amp;', '&')
     return clean
@@ -46,10 +47,11 @@ def verificar_stream_online(m3u8_url, referer_host=None):
         headers = {
             "User-Agent": HEADERS_DEFAULT["User-Agent"],
             "Referer": ref_val,
-            "Origin": origin_val
+            "Origin": origin_val,
+            "Accept": "*/*"
         }
-        res = requests.get(m3u8_url, headers=headers, timeout=3.5, verify=False)
-        if res.status_code == 200 and ("#EXTM3U" in res.text or "#EXT-X-" in res.text):
+        res = requests.get(m3u8_url, headers=headers, timeout=4.5, verify=False)
+        if res.status_code == 200 and ("#EXTM3U" in res.text or "#EXT-X-" in res.text or len(res.content) > 30):
             return True
     except Exception:
         pass
@@ -101,12 +103,18 @@ def extract_vimeos_cdn_stream(embed_url):
         if not embed_url:
             return None, None
 
-        target_url = embed_url
+        target_url = embed_url.strip()
         if target_url.startswith("//"):
             target_url = "https:" + target_url
 
         session = requests.Session()
-        res_embed = session.get(target_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
+        session.headers.update(HEADERS_DEFAULT)
+        session.headers["Referer"] = BASE_URL + "/"
+
+        parsed_target = urllib.parse.urlparse(target_url)
+        vimeos_origin = f"{parsed_target.scheme}://{parsed_target.netloc}"
+
+        res_embed = session.get(target_url, timeout=12, verify=False)
         if res_embed.status_code != 200:
             return None, None
 
@@ -118,39 +126,36 @@ def extract_vimeos_cdn_stream(embed_url):
             info_url = f"https://anal.vimeos.net/info?site=pelis28.net&uuid={random_uuid}&ts={ts_now}&isIframe=false&parentUrl={urllib.parse.quote(target_url)}"
             headers_info = dict(HEADERS_DEFAULT)
             headers_info["Referer"] = target_url
-            headers_info["Origin"] = "https://vimeos.net"
-            session.get(info_url, headers=headers_info, timeout=5, verify=False)
+            headers_info["Origin"] = vimeos_origin
+            session.get(info_url, headers=headers_info, timeout=6, verify=False)
         except Exception:
             pass
 
         unpacked_js = unpack_dean_edwards_js_exact(html_text)
+        search_corpus = f"{unpacked_js}\n{html_text}"
+
         raw_m3u8 = None
-        if unpacked_js:
-            file_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', unpacked_js, re.I)
-            if file_match and file_match.group(1):
-                raw_m3u8 = file_match.group(1)
 
-            if not raw_m3u8:
-                token_match = re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', unpacked_js, re.I)
-                if token_match and token_match.group(1):
-                    raw_m3u8 = token_match.group(1)
+        m3u8_patterns = [
+            r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
+            r'src\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']',
+            r'["\'](https?://[^"\'<>\s\\]+?\.m3u8\?[^"\'<>\s\\]+)["\']',
+            r'["\'](https?://[^"\'<>\s\\]+?\.m3u8)["\']',
+            r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)',
+            r'(https?://[^\s"\'<>\\]+?\.m3u8)'
+        ]
 
-            if not raw_m3u8:
-                simple_match = re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8)', unpacked_js, re.I)
-                if simple_match and simple_match.group(1):
-                    raw_m3u8 = simple_match.group(1)
-
-        if not raw_m3u8:
-            html_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html_text, re.I) or \
-                         re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', html_text, re.I)
-            if html_match and html_match.group(1):
-                raw_m3u8 = html_match.group(1)
+        for pat in m3u8_patterns:
+            m = re.search(pat, search_corpus, re.IGNORECASE)
+            if m and m.group(1):
+                raw_m3u8 = m.group(1)
+                break
 
         clean_master = sanitize_m3u8_url(raw_m3u8)
         if not clean_master:
             return None, None
 
-        pattern_urlset = r'(/hls2/\d+/\d+/)([a-zA-Z0-9]+)_,?([a-zA-Z0-9,]*),?\.urlset/master\.m3u8(\?.*)?'
+        pattern_urlset = r'(/hls2/\d+/\d+/)([a-zA-Z0-9_-]+)_,?([a-zA-Z0-9,]*),?\.urlset/master\.m3u8(\?.*)?'
         match_u = re.search(pattern_urlset, clean_master)
 
         if match_u:
@@ -171,11 +176,13 @@ def extract_vimeos_cdn_stream(embed_url):
 
             qualities = [q for q in qualities_str.split(',') if q]
             priority_order = ['x', 'h', 'n', 'l']
-            selected_quality = 'h'
+            selected_qualities = []
             for q_candidate in priority_order:
                 if q_candidate in qualities:
-                    selected_quality = q_candidate
-                    break
+                    selected_qualities.append(q_candidate)
+
+            if not selected_qualities:
+                selected_qualities = ['h', 'n', 'l']
 
             cdn_hosts = [
                 f"{parsed_master.scheme}://{parsed_master.netloc}",
@@ -183,17 +190,17 @@ def extract_vimeos_cdn_stream(embed_url):
                 "https://p2.vimeos.zip",
                 "https://p4.vimeos.zip",
                 "https://p6.vimeos.zip",
-                "https://p1.vimeos.zip"
+                "https://p1.vimeos.zip",
+                "https://p5.vimeos.zip",
+                "https://p3.vimeos.net",
+                "https://p2.vimeos.net"
             ]
 
-            for host in cdn_hosts:
-                candidate_url = f"{host}{base_path}{file_id}_{selected_quality}/index-v1-a1.m3u8?{final_query}"
-                if verificar_stream_online(candidate_url, target_url):
-                    return candidate_url, target_url
-
-            fallback_url = f"https://p3.vimeos.zip{base_path}{file_id}_{selected_quality}/index-v1-a1.m3u8?{final_query}"
-            if verificar_stream_online(fallback_url, target_url):
-                return fallback_url, target_url
+            for q_sel in selected_qualities:
+                for host in cdn_hosts:
+                    candidate_url = f"{host}{base_path}{file_id}_{q_sel}/index-v1-a1.m3u8?{final_query}"
+                    if verificar_stream_online(candidate_url, target_url):
+                        return candidate_url, target_url
 
         if verificar_stream_online(clean_master, target_url):
             return clean_master, target_url
@@ -236,7 +243,7 @@ def resolver_reproductor(embed_url, referer_page):
             if res_ajax.status_code == 200:
                 resp_json = res_ajax.json()
                 embed_html = resp_json.get("embed_url", "")
-                m_src = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', embed_html)
+                m_src = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', embed_html, re.IGNORECASE)
                 if m_src:
                     return m_src.group(1)
                 if embed_html.startswith("http"):
@@ -279,6 +286,10 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
         matches = [(m[0], m[1], m[2]) for m in re.findall(pattern_simple, html_search)]
 
     if not matches:
+        pattern_fallback = r'<article[^>]+class=["\'][^"\']*item-movies[^"\']*["\'][\s\S]*?<a href=["\']([^"\']+)["\'][\s\S]*?<h3 class=["\']title["\']>([^<]+)</h3>[\s\S]*?<span>(\d{4})</span>'
+        matches = re.findall(pattern_fallback, html_search)
+
+    if not matches:
         if log_dict is not None:
             log_dict["PELIS28_ERROR"] = "SIN_RESULTADOS"
         return None, None, False
@@ -303,7 +314,6 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
     except Exception:
         return None, None, False
 
-    # Extraer las opciones de reproductor para validar si tienen HD
     options_tags = re.findall(r"<li[^>]*class=['\"][^'\"]*dooplay_player_option[^'\"]*['\"][^>]*>[\s\S]*?<span class=['\"]title['\"]>([^<]+)</span>", html_movie)
     valid_titles = []
     for opt_t in options_tags:
@@ -311,7 +321,6 @@ def extract_pelis28_movie_stream(query_title, target_year="", log_dict=None):
         if "TRAILER" not in t_clean:
             valid_titles.append(t_clean)
 
-    # Si dice 'LATINO HD' o cualquier opción incluye 'HD', is_cam es False
     is_cam = False
     if valid_titles:
         has_hd = any("HD" in t for t in valid_titles)
