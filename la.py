@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*-v5 -*-
+# -*- v11111111111111 -*-
 import sys
 import re
 import urllib.parse
@@ -12,7 +12,7 @@ import xbmc
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_BASE_URL = "https://lamovie.org"
+API_BASE_URL = "https:/lamovie.org"
 API_SEARCH = f"{API_BASE_URL}/wp-api/v1/search"
 API_EPISODES = f"{API_BASE_URL}/wp-api/v1/single/episodes/list"
 API_PLAYER = f"{API_BASE_URL}/wp-api/v1/player"
@@ -481,41 +481,105 @@ def build_search_variations(raw_title):
 
     return variations
 
-def resolve_movie(title, year=""):
+def resolve_movie(title, year="", log_dict=None):
+    """
+    log_dict: diccionario opcional (el mismo que arma core.py) donde se
+    va acumulando el detalle de cada intento de búsqueda, para poder
+    ver en el log remoto exactamente qué URL se pegó, qué devolvió la
+    API y en qué paso falló.
+    """
     search_queries = build_search_variations(title)
     posts = []
 
-    for q in search_queries:
+    # Acá se guarda, intento por intento, todo lo relevante para debug.
+    search_attempts_log = []
+
+    if log_dict is not None:
+        log_dict["LAMOVIE_SEARCH_VARIATIONS"] = search_queries
+
+    for idx, q in enumerate(search_queries, start=1):
         # postsPerPage subido de 20 a 30: no se pagina, pero cubre
         # el caso de hasta ~25-30 títulos parecidos en una sola
         # respuesta, que es el techo que se espera para este catálogo.
         search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(q)}&postsPerPage=30"
+
+        attempt_info = {
+            "intento": idx,
+            "query_usada": q,
+            "url": search_url,
+            "http_status": None,
+            "posts_encontrados": 0,
+            "titulos_devueltos": [],
+            "match_encontrado": False,
+            "error": None
+        }
+
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
+            attempt_info["http_status"] = res.status_code
+
             fetched_posts = res.json().get("data", {}).get("posts", [])
+            attempt_info["posts_encontrados"] = len(fetched_posts)
+            # Guardamos título + año de cada post devuelto, para ver a
+            # simple vista si la película que buscás aparece en la
+            # respuesta cruda de la API, aunque el matcher no la elija.
+            attempt_info["titulos_devueltos"] = [
+                f"{p.get('title', '?')} ({extract_year_from_post(p) or '?'})"
+                for p in fetched_posts
+            ]
+
             if fetched_posts:
                 posts.extend(fetched_posts)
                 match_early = find_best_post_match(posts, title, year)
                 if match_early:
+                    attempt_info["match_encontrado"] = True
+                    attempt_info["match_titulo"] = match_early.get("title", "")
+                    attempt_info["match_id"] = match_early.get("_id", "")
                     posts = [match_early]
+                    search_attempts_log.append(attempt_info)
                     break
         except Exception as e:
+            attempt_info["error"] = str(e)
             xbmc.log(f"[LaMovie] Error búsqueda película: {e}", xbmc.LOGERROR)
+
+        search_attempts_log.append(attempt_info)
+
+    if log_dict is not None:
+        log_dict["LAMOVIE_SEARCH_ATTEMPTS"] = search_attempts_log
 
     selected_post = find_best_post_match(posts, title, year)
     if not selected_post:
+        if log_dict is not None:
+            log_dict["LAMOVIE_FALLO_EN"] = "find_best_post_match (ningún post matcheó título/año)"
         return None, None
 
     post_id = selected_post.get("_id")
     player_url = f"{API_PLAYER}?postId={post_id}&demo=0"
+
+    if log_dict is not None:
+        log_dict["LAMOVIE_SELECTED_POST_ID"] = post_id
+        log_dict["LAMOVIE_SELECTED_POST_TITLE"] = selected_post.get("title", "")
+        log_dict["LAMOVIE_PLAYER_URL"] = player_url
+
     try:
         res_player = requests.get(player_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
+        if log_dict is not None:
+            log_dict["LAMOVIE_PLAYER_HTTP_STATUS"] = res_player.status_code
         embeds = res_player.json().get("data", {}).get("embeds", [])
     except Exception as e:
         xbmc.log(f"[LaMovie] Error API Player película: {e}", xbmc.LOGERROR)
         embeds = []
+        if log_dict is not None:
+            log_dict["LAMOVIE_PLAYER_ERROR"] = str(e)
+
+    if log_dict is not None:
+        log_dict["LAMOVIE_EMBEDS_ENCONTRADOS"] = [
+            {"server": e.get("server", ""), "url": e.get("url", "")} for e in embeds
+        ]
 
     if not embeds:
+        if log_dict is not None:
+            log_dict["LAMOVIE_FALLO_EN"] = "sin embeds en la respuesta del player"
         return None, None
 
     ordered_embeds = []
@@ -530,10 +594,23 @@ def resolve_movie(title, year=""):
     if not ordered_embeds:
         ordered_embeds = embeds
 
+    embed_attempts_log = []
     for candidate_embed in ordered_embeds:
-        m3u8, ref = extract_vimeos_cdn_stream(candidate_embed.get("url", ""))
+        embed_url = candidate_embed.get("url", "")
+        m3u8, ref = extract_vimeos_cdn_stream(embed_url)
+        embed_attempts_log.append({
+            "embed_url": embed_url,
+            "server": candidate_embed.get("server", ""),
+            "m3u8_extraido": bool(m3u8)
+        })
         if m3u8:
+            if log_dict is not None:
+                log_dict["LAMOVIE_EMBED_ATTEMPTS"] = embed_attempts_log
             return m3u8, ref
+
+    if log_dict is not None:
+        log_dict["LAMOVIE_EMBED_ATTEMPTS"] = embed_attempts_log
+        log_dict["LAMOVIE_FALLO_EN"] = "no se pudo extraer m3u8 de ningún embed"
 
     return None, None
 
