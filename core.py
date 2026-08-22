@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# -*- v10 -*-
+# -*- ssssssssssssssssss -*-
 import sys
 import re
 import urllib.parse
@@ -61,7 +61,7 @@ def send_hostinger_log(details_dict):
 def parse_raw_query_string(raw_query):
     if not raw_query:
         return {}
-    
+
     tokens = raw_query.lstrip("?").split("&")
     params = {}
     current_key = None
@@ -155,7 +155,7 @@ def show_cinema_modal(movie_title, movie_year=""):
         xbmcplugin.setResolvedUrl(HANDLE, False, listitem=xbmcgui.ListItem())
 
     title_header = f"[COLOR red][B]{movie_title.upper()}[/B][/COLOR]"
-    
+
     if str(movie_year).strip() >= "2026":
         line_msg = (
             "[COLOR white][B]PELICULA SIN ESTRENAR - SOLO EN CINES[/B][/COLOR]\n\n"
@@ -225,7 +225,7 @@ def get_tmdb_series_info(title, max_year=""):
                 imdb_id = res_ext.json().get("imdb_id")
             except Exception:
                 pass
-        
+
         return spanish_name, original_name, first_air_year, imdb_id
 
     except Exception as e:
@@ -422,7 +422,12 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
     mod_la = cargar_modulo_remoto("la")
     if mod_la and hasattr(mod_la, "resolve_movie"):
         for q_movie in movie_queries:
-            m3u8_la, ref_la = mod_la.resolve_movie(q_movie, year)
+            # se pasa log_data para que resolve_movie vaya llenando el
+            # detalle de cada intento de búsqueda (URLs exactas, status
+            # HTTP, posts devueltos por la API, si hubo match o no, y
+            # en qué paso exacto falló si no encontró nada). Todo esto
+            # queda visible en el log remoto sin tener que adivinar.
+            m3u8_la, ref_la = mod_la.resolve_movie(q_movie, year, log_dict=log_data)
             if m3u8_la:
                 final_m3u8 = m3u8_la
                 final_embed_url = ref_la
