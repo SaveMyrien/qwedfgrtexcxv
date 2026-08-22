@@ -46,7 +46,7 @@ def verificar_stream_online(m3u8_url, referer_host=None):
             "Referer": ref_val,
             "Origin": origin_val
         }
-        res = requests.get(m3u8_url, headers=headers, timeout=3.5, verify=False)
+        res = requests.get(m3u8_url, headers=headers, timeout=4.0, verify=False)
         if res.status_code == 200 and ("#EXTM3U" in res.text or "#EXT-X-" in res.text):
             return True
     except Exception:
@@ -123,27 +123,22 @@ def extract_vimeos_cdn_stream(embed_url):
             pass
 
         unpacked_js = unpack_dean_edwards_js_exact(html_text)
+        search_blob = f"{html_text}\n{unpacked_js}"
+
         raw_m3u8 = None
-        if unpacked_js:
-            file_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', unpacked_js, re.I)
-            if file_match and file_match.group(1):
-                raw_m3u8 = file_match.group(1)
-
-            if not raw_m3u8:
-                token_match = re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', unpacked_js, re.I)
-                if token_match and token_match.group(1):
-                    raw_m3u8 = token_match.group(1)
-
-            if not raw_m3u8:
-                simple_match = re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8)', unpacked_js, re.I)
-                if simple_match and simple_match.group(1):
-                    raw_m3u8 = simple_match.group(1)
+        file_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', search_blob, re.I)
+        if file_match and file_match.group(1):
+            raw_m3u8 = file_match.group(1)
 
         if not raw_m3u8:
-            html_match = re.search(r'file\s*:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html_text, re.I) or \
-                         re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', html_text, re.I)
-            if html_match and html_match.group(1):
-                raw_m3u8 = html_match.group(1)
+            token_match = re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8\?[^\s"\'<>\\]+)', search_blob, re.I)
+            if token_match and token_match.group(1):
+                raw_m3u8 = token_match.group(1)
+
+        if not raw_m3u8:
+            simple_match = re.search(r'(https?://[^\s"\'<>\\]+?\.m3u8)', search_blob, re.I)
+            if simple_match and simple_match.group(1):
+                raw_m3u8 = simple_match.group(1)
 
         clean_master = sanitize_m3u8_url(raw_m3u8)
         if not clean_master:
@@ -417,18 +412,6 @@ def get_catalog(post_type="movies", page=1):
         return []
 
 def build_search_variations(raw_title):
-    """
-    Genera variaciones de búsqueda en orden de prioridad.
-
-    FIX: antes solo probaba "primera palabra sola" y luego el
-    "título completo", saltándose combinaciones intermedias como
-    "Harry Potter" (2 palabras). Ahora se agrega una progresión de
-    palabras (2, 3, 4...) ANTES de caer a la palabra suelta, que es
-    la variante más ruidosa y debería usarse como casi último recurso.
-    También se agrega el título completo normalizado (sin tildes/
-    puntuación) como red de seguridad final, por si el buscador del
-    sitio es sensible a acentos.
-    """
     variations = []
     base_title = raw_title.strip()
 
@@ -440,40 +423,29 @@ def build_search_variations(raw_title):
         if v and v not in variations:
             variations.append(v)
 
-    # PRIORIDAD 1: si contiene dos puntos ':' (ej. "Spider-Man: Sin camino a casa")
     if ":" in base_title:
         part_before, part_after = base_title.split(":", 1)
         add(part_after)
         add(part_before)
 
-    # PRIORIDAD 2: si contiene guión con espacios ' - '
     if " - " in base_title:
         part_before, part_after = base_title.split(" - ", 1)
         add(part_after)
         add(part_before)
 
-    # PRIORIDAD 3: si contiene '&' o '&amp;'
     if "&" in base_title or "&amp;" in base_title:
         raw_cut = base_title.replace("&amp;", "&")
         add(raw_cut.split("&")[0])
 
-    # PRIORIDAD 4 (NUEVO): progresión de palabras, de 2 en adelante.
-    # Esto es lo que permite encontrar "Harry Potter" en vez de
-    # saltar directo de "Harry" al título completo con subtítulo.
     words = base_title.split()
-    for n in range(2, len(words)):  # deja fuera 1 palabra (va después) y el total (va al final)
+    for n in range(2, len(words)):
         add(" ".join(words[:n]))
 
-    # PRIORIDAD 5: primera palabra aislada (ahora es fallback, no el primer intento)
     if words:
         add(words[0])
 
-    # PRIORIDAD 6: título completo tal cual vino
     add(base_title)
 
-    # PRIORIDAD 7 (NUEVO): título completo normalizado, sin tildes ni
-    # puntuación, como último recurso si el buscador del sitio no
-    # matchea bien con acentos/símbolos.
     normalized_full = normalize_string(base_title)
     if normalized_full:
         add(normalized_full.title())
@@ -481,25 +453,14 @@ def build_search_variations(raw_title):
     return variations
 
 def resolve_movie(title, year="", log_dict=None):
-    """
-    log_dict: diccionario opcional (el mismo que arma core.py) donde se
-    va acumulando el detalle de cada intento de búsqueda, para poder
-    ver en el log remoto exactamente qué URL se pegó, qué devolvió la
-    API y en qué paso falló.
-    """
     search_queries = build_search_variations(title)
     posts = []
-
-    # Acá se guarda, intento por intento, todo lo relevante para debug.
     search_attempts_log = []
 
     if log_dict is not None:
         log_dict["LAMOVIE_SEARCH_VARIATIONS"] = search_queries
 
     for idx, q in enumerate(search_queries, start=1):
-        # postsPerPage subido de 20 a 30: no se pagina, pero cubre
-        # el caso de hasta ~25-30 títulos parecidos en una sola
-        # respuesta, que es el techo que se espera para este catálogo.
         search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(q)}&postsPerPage=30"
 
         attempt_info = {
@@ -519,9 +480,6 @@ def resolve_movie(title, year="", log_dict=None):
 
             fetched_posts = res.json().get("data", {}).get("posts", [])
             attempt_info["posts_encontrados"] = len(fetched_posts)
-            # Guardamos título + año de cada post devuelto, para ver a
-            # simple vista si la película que buscás aparece en la
-            # respuesta cruda de la API, aunque el matcher no la elija.
             attempt_info["titulos_devueltos"] = [
                 f"{p.get('title', '?')} ({extract_year_from_post(p) or '?'})"
                 for p in fetched_posts
@@ -581,20 +539,13 @@ def resolve_movie(title, year="", log_dict=None):
             log_dict["LAMOVIE_FALLO_EN"] = "sin embeds en la respuesta del player"
         return None, None
 
-    ordered_embeds = []
-    for embed in embeds:
-        url = embed.get("url", "").lower()
-        name = embed.get("server", "").lower()
-        if "vimeos" in url or "lamovie" in name:
-            ordered_embeds.insert(0, embed)
-        elif "goodstream" in url or "goodstream" in name:
-            ordered_embeds.append(embed)
-
-    if not ordered_embeds:
-        ordered_embeds = embeds
+    vimeos_embeds = [
+        e for e in embeds 
+        if "vimeos" in e.get("url", "").lower() or "lamovie" in e.get("server", "").lower()
+    ]
 
     embed_attempts_log = []
-    for candidate_embed in ordered_embeds:
+    for candidate_embed in vimeos_embeds:
         embed_url = candidate_embed.get("url", "")
         m3u8, ref = extract_vimeos_cdn_stream(embed_url)
         embed_attempts_log.append({
@@ -609,7 +560,7 @@ def resolve_movie(title, year="", log_dict=None):
 
     if log_dict is not None:
         log_dict["LAMOVIE_EMBED_ATTEMPTS"] = embed_attempts_log
-        log_dict["LAMOVIE_FALLO_EN"] = "no se pudo extraer m3u8 de ningún embed"
+        log_dict["LAMOVIE_FALLO_EN"] = "no se pudo extraer m3u8 de ningún embed de vimeos"
 
     return None, None
 
@@ -625,7 +576,6 @@ def resolve_series(query_candidates, s_num, e_num, effective_year=""):
     used_query = expanded_candidates[0] if expanded_candidates else ""
 
     for candidate_query in expanded_candidates:
-        # postsPerPage subido de 26 a 30 por la misma razón que en resolve_movie
         search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(candidate_query)}&postsPerPage=30"
         try:
             res = requests.get(search_url, headers=HEADERS_DEFAULT, timeout=10, verify=False)
@@ -657,19 +607,12 @@ def resolve_series(query_candidates, s_num, e_num, effective_year=""):
     if not embeds:
         return None, None, used_query
 
-    ordered_embeds = []
-    for embed in embeds:
-        url = embed.get("url", "").lower()
-        name = embed.get("server", "").lower()
-        if "vimeos" in url or "lamovie" in name:
-            ordered_embeds.insert(0, embed)
-        elif "goodstream" in url or "goodstream" in name:
-            ordered_embeds.append(embed)
+    vimeos_embeds = [
+        e for e in embeds 
+        if "vimeos" in e.get("url", "").lower() or "lamovie" in e.get("server", "").lower()
+    ]
 
-    if not ordered_embeds:
-        ordered_embeds = embeds
-
-    for candidate_embed in ordered_embeds:
+    for candidate_embed in vimeos_embeds:
         m3u8, ref = extract_vimeos_cdn_stream(candidate_embed.get("url", ""))
         if m3u8:
             return m3u8, ref, used_query
