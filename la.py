@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- v11111111111111 -*-
 import sys
 import re
 import urllib.parse
@@ -12,7 +11,7 @@ import xbmc
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_BASE_URL = "https:/lamovie.org"
+API_BASE_URL = "https://lamovie.org"
 API_SEARCH = f"{API_BASE_URL}/wp-api/v1/search"
 API_EPISODES = f"{API_BASE_URL}/wp-api/v1/single/episodes/list"
 API_PLAYER = f"{API_BASE_URL}/wp-api/v1/player"
