@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- aasd -*-
 import sys
 import re
 import urllib.parse
@@ -26,7 +27,7 @@ HEADERS_DEFAULT = {
 }
 
 HTTP_SESSION = requests.Session()
-HTTP_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=1)
+HTTP_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=15, pool_maxsize=15, max_retries=0)
 HTTP_SESSION.mount("https://", HTTP_ADAPTER)
 HTTP_SESSION.mount("http://", HTTP_ADAPTER)
 
@@ -38,7 +39,7 @@ def sanitize_m3u8_url(url):
     clean = clean.replace('&amp;', '&')
     return clean
 
-def verificar_stream_online(m3u8_url, referer_host=None):
+def verificar_stream_online_fast(m3u8_url, referer_host=None):
     if not m3u8_url or not m3u8_url.startswith("http"):
         return False
     try:
@@ -51,14 +52,14 @@ def verificar_stream_online(m3u8_url, referer_host=None):
             "Referer": ref_val,
             "Origin": origin_val
         }
-        res = HTTP_SESSION.get(m3u8_url, headers=headers, timeout=2.0, verify=False, stream=True)
+        res = HTTP_SESSION.head(m3u8_url, headers=headers, timeout=1.2, verify=False, allow_redirects=True)
         if res.status_code == 200:
-            chunk = res.raw.read(128, decode_content=True)
-            res.close()
-            if b"#EXTM3U" in chunk or b"#EXT-X-" in chunk:
+            return True
+        if res.status_code in (403, 405):
+            res_get = HTTP_SESSION.get(m3u8_url, headers=headers, timeout=1.2, verify=False, stream=True)
+            if res_get.status_code == 200:
+                res_get.close()
                 return True
-        else:
-            res.close()
     except Exception:
         pass
     return False
@@ -114,7 +115,7 @@ def extract_vimeos_cdn_stream(embed_url):
         if target_url.startswith("//"):
             target_url = "https:" + target_url
 
-        res_embed = HTTP_SESSION.get(target_url, headers=HEADERS_DEFAULT, timeout=5, verify=False)
+        res_embed = HTTP_SESSION.get(target_url, headers=HEADERS_DEFAULT, timeout=3.5, verify=False)
         if res_embed.status_code != 200:
             return None, None
 
@@ -168,31 +169,35 @@ def extract_vimeos_cdn_stream(embed_url):
                     selected_quality = q_candidate
                     break
 
+            primary_cdn = f"{parsed_master.scheme}://{parsed_master.netloc}"
+            primary_url = f"{primary_cdn}{base_path}{file_id}_{selected_quality}/index-v1-a1.m3u8?{final_query}"
+            
+            if verificar_stream_online_fast(primary_url, target_url):
+                return primary_url, target_url
+
             cdn_hosts = [
-                f"{parsed_master.scheme}://{parsed_master.netloc}",
+                "https://p4.vimeos.zip",
                 "https://p3.vimeos.zip",
                 "https://p2.vimeos.zip",
-                "https://p4.vimeos.zip",
                 "https://p6.vimeos.zip",
                 "https://p1.vimeos.zip"
             ]
 
             candidate_urls = [
                 f"{host}{base_path}{file_id}_{selected_quality}/index-v1-a1.m3u8?{final_query}"
-                for host in cdn_hosts
+                for host in cdn_hosts if host != primary_cdn
             ]
 
-            with ThreadPoolExecutor(max_workers=6) as executor:
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 future_to_url = {
-                    executor.submit(verificar_stream_online, cand_url, target_url): cand_url 
+                    executor.submit(verificar_stream_online_fast, cand_url, target_url): cand_url 
                     for cand_url in candidate_urls
                 }
                 for future in as_completed(future_to_url):
                     if future.result():
                         return future_to_url[future], target_url
 
-        if verificar_stream_online(clean_master, target_url):
-            return clean_master, target_url
+        return clean_master, target_url
 
     except Exception as err:
         xbmc.log(f"[LaMovie] Error extraccion vimeos: {err}", xbmc.LOGERROR)
@@ -365,7 +370,7 @@ def get_episode_post_id(series_id, season_num, episode_num):
     while True:
         episodes_url = f"{API_EPISODES}?_id={series_id}&season={target_season}&page={page}&postsPerPage=15"
         try:
-            res = HTTP_SESSION.get(episodes_url, headers=HEADERS_DEFAULT, timeout=8, verify=False)
+            res = HTTP_SESSION.get(episodes_url, headers=HEADERS_DEFAULT, timeout=5, verify=False)
             data = res.json().get("data", {})
             episodes = data.get("posts", [])
             pagination = data.get("pagination", {})
@@ -392,7 +397,7 @@ def get_episode_post_id(series_id, season_num, episode_num):
 def resolve_series_from_year_catalog(target_year):
     req_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&postsPerPage=30"
     try:
-        res = HTTP_SESSION.get(req_url, headers=HEADERS_DEFAULT, timeout=6, verify=False)
+        res = HTTP_SESSION.get(req_url, headers=HEADERS_DEFAULT, timeout=4, verify=False)
         posts = res.json().get("data", {}).get("posts", [])
         for post in posts:
             p_year = extract_year_from_post(post)
@@ -407,7 +412,7 @@ def resolve_series_from_year_catalog(target_year):
 def get_catalog(post_type="movies", page=1):
     req_url = f"{API_SEARCH}?filter=%7B%7D&postType={post_type}&page={page}&postsPerPage=24"
     try:
-        res = HTTP_SESSION.get(req_url, headers=HEADERS_DEFAULT, timeout=8, verify=False)
+        res = HTTP_SESSION.get(req_url, headers=HEADERS_DEFAULT, timeout=5, verify=False)
         return res.json().get("data", {}).get("posts", [])
     except Exception as e:
         xbmc.log(f"[LaMovie] Error catálogo: {e}", xbmc.LOGERROR)
@@ -477,7 +482,7 @@ def resolve_movie(title, year="", log_dict=None):
         }
 
         try:
-            res = HTTP_SESSION.get(search_url, headers=HEADERS_DEFAULT, timeout=8, verify=False)
+            res = HTTP_SESSION.get(search_url, headers=HEADERS_DEFAULT, timeout=4, verify=False)
             attempt_info["http_status"] = res.status_code
 
             fetched_posts = res.json().get("data", {}).get("posts", [])
@@ -521,7 +526,7 @@ def resolve_movie(title, year="", log_dict=None):
         log_dict["LAMOVIE_PLAYER_URL"] = player_url
 
     try:
-        res_player = HTTP_SESSION.get(player_url, headers=HEADERS_DEFAULT, timeout=8, verify=False)
+        res_player = HTTP_SESSION.get(player_url, headers=HEADERS_DEFAULT, timeout=4, verify=False)
         if log_dict is not None:
             log_dict["LAMOVIE_PLAYER_HTTP_STATUS"] = res_player.status_code
         embeds = res_player.json().get("data", {}).get("embeds", [])
@@ -580,7 +585,7 @@ def resolve_series(query_candidates, s_num, e_num, effective_year=""):
     for candidate_query in expanded_candidates:
         search_url = f"{API_SEARCH}?filter=%7B%7D&postType=any&q={urllib.parse.quote_plus(candidate_query)}&postsPerPage=30"
         try:
-            res = HTTP_SESSION.get(search_url, headers=HEADERS_DEFAULT, timeout=8, verify=False)
+            res = HTTP_SESSION.get(search_url, headers=HEADERS_DEFAULT, timeout=4, verify=False)
             posts = res.json().get("data", {}).get("posts", [])
         except Exception:
             posts = []
@@ -601,7 +606,7 @@ def resolve_series(query_candidates, s_num, e_num, effective_year=""):
 
     player_url = f"{API_PLAYER}?postId={episode_id}&demo=0"
     try:
-        res_player = HTTP_SESSION.get(player_url, headers=HEADERS_DEFAULT, timeout=8, verify=False)
+        res_player = HTTP_SESSION.get(player_url, headers=HEADERS_DEFAULT, timeout=4, verify=False)
         embeds = res_player.json().get("data", {}).get("embeds", [])
     except Exception:
         embeds = []
