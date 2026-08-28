@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- final -*-
 import sys
 import re
 import urllib.parse
@@ -27,6 +27,7 @@ HOSTINGER_LOG_URL = "https://blueviolet-moose-134451.hostingersite.com/repo/log.
 
 GITHUB_MODULES = {
     "gn": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/gn.py",
+    "gn_s": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/gn_s.py",
     "la": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/la.py",
     "plus": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/plus.py",
     "embed69": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/embed69.py",
@@ -347,19 +348,32 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         used_query = search_query
 
         # -------------------------------------------------------------
-        # OPCION 1: la.py (LaMovie API)
+        # OPCION 1: gn_s.py (GnulaHD Series)
         # -------------------------------------------------------------
-        if mod_la and hasattr(mod_la, "resolve_series"):
-            m3u8_la, ref_la, used_q = mod_la.resolve_series(query_candidates, s_num, e_num, effective_year)
+        mod_gn_s = cargar_modulo_remoto("gn_s")
+        if mod_gn_s and hasattr(mod_gn_s, "resolve_series"):
+            m3u8_gn, ref_gn, used_q_gn = mod_gn_s.resolve_series(query_candidates, s_num, e_num, effective_year, log_dict=log_data)
+            if m3u8_gn:
+                final_m3u8 = m3u8_gn
+                final_embed_url = ref_gn
+                log_data["PROVEEDOR"] = "GNULA_SERIES"
+            if used_q_gn:
+                used_query = used_q_gn
+
+        # -------------------------------------------------------------
+        # OPCION 2: la.py (LaMovie API)
+        # -------------------------------------------------------------
+        if not final_m3u8 and mod_la and hasattr(mod_la, "resolve_series"):
+            m3u8_la, ref_la, used_q_la = mod_la.resolve_series(query_candidates, s_num, e_num, effective_year)
             if m3u8_la:
                 final_m3u8 = m3u8_la
                 final_embed_url = ref_la
                 log_data["PROVEEDOR"] = "LAMOVIE_API"
-            if used_q:
-                used_query = used_q
+            if used_q_la:
+                used_query = used_q_la
 
         # -------------------------------------------------------------
-        # OPCION 2: plus.py (Pelisplus / Streamfort)
+        # OPCION 3: plus.py (Pelisplus / Streamfort)
         # -------------------------------------------------------------
         if not final_m3u8:
             mod_plus = cargar_modulo_remoto("plus")
@@ -371,7 +385,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
                     log_data["PROVEEDOR"] = "PELISPLUS_STREAMFORT"
 
         # -------------------------------------------------------------
-        # OPCION 3: embed69.py (Embed69)
+        # OPCION 4: embed69.py (Embed69)
         # -------------------------------------------------------------
         if not final_m3u8 and imdb_id:
             mod_embed69 = cargar_modulo_remoto("embed69")
