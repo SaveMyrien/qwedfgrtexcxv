@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- ssssssssssssssssss -*-
 import sys
 import re
 import urllib.parse
@@ -27,6 +26,7 @@ TMDB_TV_EXTERNAL_IDS = "https://api.themoviedb.org/3/tv/{tv_id}/external_ids"
 HOSTINGER_LOG_URL = "https://blueviolet-moose-134451.hostingersite.com/repo/log.php"
 
 GITHUB_MODULES = {
+    "gn": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/gn.py",
     "la": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/la.py",
     "plus": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/plus.py",
     "embed69": "https://raw.githubusercontent.com/SaveMyrien/qwedfgrtexcxv/refs/heads/main/embed69.py",
@@ -418,24 +418,32 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
 
     movie_queries = get_movie_title_variations(clean_title)
 
-    # 1. Intentar con la.py (LaMovie)
-    mod_la = cargar_modulo_remoto("la")
-    if mod_la and hasattr(mod_la, "resolve_movie"):
+    # 1. Intentar con gn.py (GnulaHD)
+    mod_gn = cargar_modulo_remoto("gn")
+    if mod_gn and hasattr(mod_gn, "resolve_movie"):
         for q_movie in movie_queries:
-            # se pasa log_data para que resolve_movie vaya llenando el
-            # detalle de cada intento de búsqueda (URLs exactas, status
-            # HTTP, posts devueltos por la API, si hubo match o no, y
-            # en qué paso exacto falló si no encontró nada). Todo esto
-            # queda visible en el log remoto sin tener que adivinar.
-            m3u8_la, ref_la = mod_la.resolve_movie(q_movie, year, log_dict=log_data)
-            if m3u8_la:
-                final_m3u8 = m3u8_la
-                final_embed_url = ref_la
-                log_data["PROVEEDOR"] = "LAMOVIE_API"
+            m3u8_gn, ref_gn = mod_gn.resolve_movie(q_movie, year, log_dict=log_data)
+            if m3u8_gn:
+                final_m3u8 = m3u8_gn
+                final_embed_url = ref_gn
+                log_data["PROVEEDOR"] = "GNULA_HD"
                 log_data["USED_MOVIE_QUERY"] = q_movie
                 break
 
-    # 2. Respaldo exclusivo de películas con pelis28.py
+    # 2. Respaldo con la.py (LaMovie)
+    if not final_m3u8:
+        mod_la = cargar_modulo_remoto("la")
+        if mod_la and hasattr(mod_la, "resolve_movie"):
+            for q_movie in movie_queries:
+                m3u8_la, ref_la = mod_la.resolve_movie(q_movie, year, log_dict=log_data)
+                if m3u8_la:
+                    final_m3u8 = m3u8_la
+                    final_embed_url = ref_la
+                    log_data["PROVEEDOR"] = "LAMOVIE_API"
+                    log_data["USED_MOVIE_QUERY"] = q_movie
+                    break
+
+    # 3. Respaldo exclusivo de películas con pelis28.py
     if not final_m3u8:
         mod_pelis28 = cargar_modulo_remoto("pelis28")
         if mod_pelis28 and hasattr(mod_pelis28, "extract_pelis28_movie_stream"):
@@ -462,7 +470,7 @@ def play_from_bingie(title="", year="", season="", episode="", tvshowtitle="", *
         show_cinema_modal(clean_title, year)
         return
 
-    # Si la calidad es exclusivamente de cine (LATINO sin HD), pedir confirmación
+    # Si la calidad es de cine (LATINO sin HD), pedir confirmación
     if is_cam_quality:
         wants_to_play = ask_cam_quality_playback(clean_title)
         if not wants_to_play:
