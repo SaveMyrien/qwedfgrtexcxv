@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- final -*-
 import sys
 import re
 import urllib.parse
@@ -54,9 +54,9 @@ def gnrd_unpack(packed_string):
         return {}
 
 def extract_player_tokens_from_html(html_text):
-    pid_match = re.search(r'_gnrdPid\s*=\s*(\d+)', html_text)
+    pid_match = re.search(r'var\s+_gnrdPid\s*=\s*(\d+)', html_text)
     if not pid_match:
-        pid_match = re.search(r'data-id=["\'](\d+)["\']', html_text)
+        pid_match = re.search(r'_gnrdPid\s*=\s*(\d+)', html_text)
     if not pid_match:
         pid_match = re.search(r'tsUpdateView\((\d+)\)', html_text)
 
@@ -137,65 +137,50 @@ def find_best_post_match(posts, search_title, target_year=""):
     clean_target = normalize_string(search_title)
     clean_target_tokens = clean_target.replace(" ", "")
     target_year = str(target_year).strip()
-    first_keyword = clean_target.split()[0] if clean_target else ""
 
-    subtitles = []
-    if ":" in search_title:
-        sub_part = normalize_string(search_title.split(":", 1)[1])
-        if sub_part:
-            subtitles.append(sub_part)
-    if " - " in search_title:
-        sub_part = normalize_string(search_title.split(" - ", 1)[1])
-        if sub_part:
-            subtitles.append(sub_part)
+    # Filtro excluyente por tipo Película
+    pelis_only = [p for p in posts if p.get("type", "").lower() in ("pelicula", "peliculas", "movie")]
+    pool = pelis_only if pelis_only else posts
 
+    # 1. Búsqueda con año especificado (Filtro estricto)
     if target_year:
-        for post in posts:
+        # Match exacto de tokens + año
+        for post in pool:
             p_clean = normalize_string(post.get("title", ""))
             p_year = extract_year_from_post(post)
             if clean_target_tokens == p_clean.replace(" ", "") and p_year == target_year:
                 return post
 
-        for post in posts:
+        # Match de frase completa contenida + año
+        for post in pool:
             p_clean = normalize_string(post.get("title", ""))
             p_year = extract_year_from_post(post)
-            for sub in subtitles:
-                if sub and (sub in p_clean or p_clean in sub) and p_year == target_year:
-                    return post
-
-        for post in posts:
-            p_clean = normalize_string(post.get("title", ""))
-            p_year = extract_year_from_post(post)
-            if first_keyword and first_keyword in p_clean.split() and p_year == target_year:
-                return post
-
-        pattern = rf'\b{re.escape(clean_target)}\b'
-        for post in posts:
-            p_clean = normalize_string(post.get("title", ""))
-            p_year = extract_year_from_post(post)
+            pattern = rf'\b{re.escape(clean_target)}\b'
             if re.search(pattern, p_clean) and p_year == target_year:
                 return post
 
-    for post in posts:
+        # Si había año y no coincidió con ningún resultado, se descarta
+        return None
+
+    # 2. Búsqueda sin año especificado
+    for post in pool:
         p_clean = normalize_string(post.get("title", ""))
-        p_year = extract_year_from_post(post)
-        if target_year and p_year and p_year != target_year:
-            continue
         if clean_target_tokens == p_clean.replace(" ", ""):
             return post
-        for sub in subtitles:
-            if sub and (sub in p_clean or p_clean in sub):
-                return post
-        if first_keyword and first_keyword in p_clean.split():
-            return post
 
-    pattern = rf'\b{re.escape(clean_target)}\b'
-    for post in posts:
+    for post in pool:
         p_clean = normalize_string(post.get("title", ""))
+        pattern = rf'^{re.escape(clean_target)}$'
         if re.search(pattern, p_clean):
             return post
 
-    return posts[0] if posts else None
+    for post in pool:
+        p_clean = normalize_string(post.get("title", ""))
+        pattern = rf'\b{re.escape(clean_target)}\b'
+        if re.search(pattern, p_clean):
+            return post
+
+    return None
 
 def find_best_series_match(posts, search_title, target_year=""):
     return find_best_post_match(posts, search_title, target_year)
@@ -211,42 +196,39 @@ def get_catalog(post_type="Pelicula", page=1):
 
 def build_search_variations(raw_title):
     variations = []
-    base_title = raw_title.strip()
+    base_title = (raw_title or "").strip()
 
     if not base_title:
         return variations
 
     def add(v):
         v = (v or "").strip()
-        if v and v not in variations:
+        if v and len(v) >= 3 and v not in variations:
             variations.append(v)
 
+    # 1. Título completo prioritario
+    add(base_title)
+
+    # 2. Partes principales por separadores
     if ":" in base_title:
         part_before, part_after = base_title.split(":", 1)
-        add(part_after)
         add(part_before)
+        add(part_after)
 
     if " - " in base_title:
         part_before, part_after = base_title.split(" - ", 1)
-        add(part_after)
         add(part_before)
+        add(part_after)
 
     if "&" in base_title or "&amp;" in base_title:
         raw_cut = base_title.replace("&amp;", "&")
         add(raw_cut.split("&")[0])
 
+    # 3. Frases largas (solo combinaciones de al menos 3 palabras)
     words = base_title.split()
-    for n in range(2, len(words)):
-        add(" ".join(words[:n]))
-
-    if words:
-        add(words[0])
-
-    add(base_title)
-
-    normalized_full = normalize_string(base_title)
-    if normalized_full:
-        add(normalized_full.title())
+    if len(words) >= 3:
+        for n in range(len(words) - 1, 2, -1):
+            add(" ".join(words[:n]))
 
     return variations
 
@@ -285,7 +267,7 @@ def resolve_movie(title, year="", log_dict=None, preferred_lang="latino"):
 
             if fetched_posts:
                 posts.extend(fetched_posts)
-                match_early = find_best_post_match(posts, title, year)
+                match_early = find_best_post_match(fetched_posts, title, year)
                 if match_early:
                     attempt_info["match_encontrado"] = True
                     attempt_info["match_titulo"] = match_early.get("title", "")
