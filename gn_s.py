@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- final -*-
 import sys
 import re
 import urllib.parse
@@ -78,29 +78,42 @@ def build_search_variations(raw_title):
         if v and v not in variations:
             variations.append(v)
 
+    # 1. Título completo siempre en primer lugar
+    add(base_title)
+
+    # 2. Subtítulos antes y después de separadores
     if ":" in base_title:
         part_before, part_after = base_title.split(":", 1)
-        add(part_after)
         add(part_before)
+        add(part_after)
 
     if " - " in base_title:
         part_before, part_after = base_title.split(" - ", 1)
-        add(part_after)
         add(part_before)
+        add(part_after)
 
     if "&" in base_title or "&amp;" in base_title:
         raw_cut = base_title.replace("&amp;", "&")
         add(raw_cut.split("&")[0])
 
+    # 3. Frases largas compuestas
     words = base_title.split()
-    for n in range(2, len(words)):
+    for n in range(len(words) - 1, 1, -1):
         add(" ".join(words[:n]))
 
-    if words:
-        add(words[0])
-
-    add(base_title)
     return variations
+
+def extract_year_from_post(post):
+    post_year = str(post.get("year", "")).strip()
+    if post_year.isdigit() and len(post_year) == 4:
+        return post_year
+
+    raw_title = post.get("title", "")
+    match = re.search(r'\((\d{4})\)', raw_title)
+    if match:
+        return match.group(1)
+
+    return ""
 
 def find_best_series_match(results, search_title, target_year=""):
     if not results:
@@ -113,30 +126,43 @@ def find_best_series_match(results, search_title, target_year=""):
     series_only = [item for item in results if item.get("type", "").lower() in ("serie", "series", "anime")]
     pool = series_only if series_only else results
 
+    # 1. Si hay año definido: exigir coincidencia estricta de título + año
     if target_year:
         for item in pool:
-            item_clean = normalize_string(item.get("title", ""))
-            item_year = str(item.get("year", "")).strip()
-            if clean_target_tokens == item_clean.replace(" ", "") and item_year == target_year:
+            p_clean = normalize_string(item.get("title", ""))
+            p_year = extract_year_from_post(item)
+            if clean_target_tokens == p_clean.replace(" ", "") and p_year == target_year:
                 return item
 
         for item in pool:
-            item_clean = normalize_string(item.get("title", ""))
-            item_year = str(item.get("year", "")).strip()
-            if (clean_target in item_clean or item_clean in clean_target) and item_year == target_year:
+            p_clean = normalize_string(item.get("title", ""))
+            p_year = extract_year_from_post(item)
+            pattern = rf'\b{re.escape(clean_target)}\b'
+            if re.search(pattern, p_clean) and p_year == target_year:
                 return item
 
+        # Si el año no coincide, no forzamos coincidencias falsas
+        return None
+
+    # 2. Si no hay año: buscar coincidencia exacta de tokens o frase completa
     for item in pool:
-        item_clean = normalize_string(item.get("title", ""))
-        if clean_target_tokens == item_clean.replace(" ", ""):
+        p_clean = normalize_string(item.get("title", ""))
+        if clean_target_tokens == p_clean.replace(" ", ""):
             return item
 
     for item in pool:
-        item_clean = normalize_string(item.get("title", ""))
-        if clean_target in item_clean or item_clean in clean_target:
+        p_clean = normalize_string(item.get("title", ""))
+        pattern = rf'^{re.escape(clean_target)}$'
+        if re.search(pattern, p_clean):
             return item
 
-    return pool[0] if pool else None
+    for item in pool:
+        p_clean = normalize_string(item.get("title", ""))
+        pattern = rf'\b{re.escape(clean_target)}\b'
+        if re.search(pattern, p_clean):
+            return item
+
+    return None
 
 def extract_player_tokens_from_html(html_text):
     pid_match = re.search(r'var\s+_gnrdPid\s*=\s*(\d+)', html_text)
@@ -215,7 +241,7 @@ def resolve_series(query_candidates, s_num, e_num, effective_year="", log_dict=N
 
     if not series_item:
         if log_dict is not None:
-            log_dict["GNULA_FALLO_EN"] = "no se encontró la serie en el buscador"
+            log_dict["GNULA_FALLO_EN"] = "no se encontró la serie en el buscador con título/año válidos"
         return None, None, used_query
 
     series_url = series_item.get("url", "")
