@@ -1,4 +1,4 @@
-# -*- final -*-
+# -*- coding: utf-8 -*-
 import sys
 import re
 import urllib.parse
@@ -75,7 +75,7 @@ def build_search_variations(raw_title):
 
     def add(v):
         v = (v or "").strip()
-        if v and v not in variations:
+        if v and len(v) >= 3 and v not in variations:
             variations.append(v)
 
     # 1. Título completo siempre en primer lugar
@@ -98,8 +98,9 @@ def build_search_variations(raw_title):
 
     # 3. Frases largas compuestas
     words = base_title.split()
-    for n in range(len(words) - 1, 1, -1):
-        add(" ".join(words[:n]))
+    if len(words) >= 3:
+        for n in range(len(words) - 1, 1, -1):
+            add(" ".join(words[:n]))
 
     return variations
 
@@ -141,7 +142,6 @@ def find_best_series_match(results, search_title, target_year=""):
             if re.search(pattern, p_clean) and p_year == target_year:
                 return item
 
-        # Si el año no coincide, no forzamos coincidencias falsas
         return None
 
     # 2. Si no hay año: buscar coincidencia exacta de tokens o frase completa
@@ -184,10 +184,15 @@ def extract_player_tokens_from_html(html_text):
     return pid, tok, vd_auth
 
 def resolve_server_stream(server_obj, page_url, vd_auth=""):
+    """
+    Solo resuelve servidores Vidara o streams directos (.m3u8 / .mp4).
+    Si no es reproducible de forma nativa por Kodi, devuelve (None, None).
+    """
     src = server_obj.get("src", "")
     if not src:
         return None, None
 
+    # Caso 1: Servidores Vidara
     vd_match = re.search(r'(vidara\.to|vidaraa\.cc)/(?:e/)?([A-Za-z0-9_-]+)', src, re.I)
     if vd_match:
         host = vd_match.group(1).lower()
@@ -196,10 +201,12 @@ def resolve_server_stream(server_obj, page_url, vd_auth=""):
         vidara_url = f"{VIDARA_RESOLVE}?pl=1&code={code}&host={host}{auth_param}"
         return vidara_url, page_url
 
+    # Caso 2: Stream directo manifiesto o archivo de video
     if ".m3u8" in src or ".mp4" in src:
         return src, page_url
 
-    return src, page_url
+    # Descartar cualquier otro embed web genérico para activar el fallback
+    return None, None
 
 def build_kodi_stream_url(raw_stream_url, referer=None):
     if not raw_stream_url:
@@ -338,6 +345,6 @@ def resolve_series(query_candidates, s_num, e_num, effective_year="", log_dict=N
             return stream_url, referer, used_query
 
     if log_dict is not None:
-        log_dict["GNULA_FALLO_EN"] = "no se pudo resolver stream de los servidores disponibles"
+        log_dict["GNULA_FALLO_EN"] = "no se encontro servidor Vidara ni stream reproducible directo"
 
     return None, None, used_query
